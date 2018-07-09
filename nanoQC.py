@@ -138,7 +138,8 @@ class NanoQC(object):
                             phred_list = list()
                             for letter in qual:
                                 phred_list.append(letter)
-                            average_phred = int(np.round(np.mean(phred_list)) - 33)
+                            # average_phred = int(np.round(np.mean(phred_list)) - 33)
+                            average_phred = np.round(np.mean(phred_list), 1) - 33
                             # GC percentage
                             g_count = float(seq.count(b'G'))
                             c_count = float(seq.count(b'C'))
@@ -510,10 +511,12 @@ class NanoQC(object):
         g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
                           stat_func=None,
                           xlim=[pd.DataFrame.min(df_pass['Length (bp)']), pd.DataFrame.max(df_pass['Length (bp)'])],
-                          space=0, size=8)
+                          space=0)
         ax = g.ax_joint
         ax.set_xscale('log')
         g.ax_marg_x.set_xscale('log')
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
 
         g.savefig(self.output_folder + "/quality_vs_length.png")
 
