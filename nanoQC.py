@@ -5,10 +5,18 @@ import os.path
 import glob
 import numpy as np
 from time import time
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 
 
 __author__ = 'duceppemo'
 
+
+# TODO -> make sure it all run nice if only pass present, if only fail present or both are present
+# TODO -> parse the fastq file if parallel, if gives a performance gain
+#         Either share dictionary across threads, or create one dictonary per thread and merge at the end???
+# TODO -> make compatible with gzipped files. YOu can't memory map the content of a compressed file!!!
 
 class NanoQC(object):
 
@@ -27,7 +35,7 @@ class NanoQC(object):
         self.input_fastq_list = list()
         for fastq_file in glob.iglob(self.input_folder + '/**/*fastq*', recursive=True):
             if os.path.isfile(fastq_file):
-                 self.input_fastq_list.append(fastq_file)
+                self.input_fastq_list.append(fastq_file)
 
         # run the script
         self.run()
@@ -35,10 +43,15 @@ class NanoQC(object):
     def run(self):
         """Run everything"""
         self.parse_fastq(self.input_fastq_list, self.sample_dict)
-        print("\nPlotting stats...")
-        self.graph_read_number(self.sample_dict)  # Reads over time per sample. One graph per sample
+        print("\nMaking plots...")
+        self.make_plots()
 
     def hbytes(self, num):
+        """
+        Convert bytes to KB, MB, GB or TB
+        :param num: a file size in bytes
+        :return: A string representing the size of the file with proper units
+        """
         for x in ['bytes', 'KB', 'MB', 'GB']:
             if num < 1024.0:
                 return "%3.1f%s" % (num, x)
@@ -46,6 +59,11 @@ class NanoQC(object):
         return "%3.1f%s" % (num, 'TB')
 
     def elapsed_time(self, seconds):
+        """
+        Transform a time value into a string
+        :param seconds: Elapsed time in seconds
+        :return: Formated time string
+        """
         minutes, seconds = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
         days, hours = divmod(hours, 24)
@@ -55,75 +73,101 @@ class NanoQC(object):
 
     def parse_fastq(self, f, d):
         """
-        Parse a fastq file into a dictionary
-        :param f: A fastq file handle
-        :param d: A dictionary to store the relevant information about each sequence
+        Parse a basecalled nanopore fastq file by Albacore into a dictionary.
+        Multiple fastq files shall be from the same sequencing run.
+        :param f: A basecalled nanopore fastq file.
+        :param d: A dictionary to store the relevant information about each sequence and sample
         :return: An update dictionary
         https://www.biostars.org/p/317524/
         http://www.blopig.com/blog/2016/08/processing-large-files-using-python/
         """
         from dateutil.parser import parse
         import gzip
+        import mmap
 
         for f in self.input_fastq_list:
-            with gzip.open(f, 'rt') if f.endswith('gz') else open(f, 'rU') as file:
-                start_time = time()
+            with gzip.open(f, 'rb') if f.endswith('gz') else open(f, 'r') as file:
+                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    # if f.name.endswith('gz'):
+                    #     gzip.GzipFile(mode='r', fileobj=mm)
+                    start_time = time()
 
-                name = os.path.basename(file.name).split('.')[0].split('_')[0]  # Everything before the 1st underscore
-                # name = file.name.split('/')[-2]  # Parent folder name
+                    # name = os.path.basename(file.name).split('.')[0].split('_')[0]
+                    name = file.name.split('/')[-2]  # Parent folder name
 
-                # get some stats about the input file
-                statinfo = os.stat(file.name)
-                file_size = self.hbytes(statinfo.st_size)
+                    # get some stats about the input file
+                    statinfo = os.stat(file.name)
+                    file_size = self.hbytes(statinfo.st_size)
 
-                flag = 'pass'  # Default value
-                if 'fail' in file.name:
-                    flag = 'fail'  # Check in path for the word "fail"
-                    print("Parsing sample \"%s\" from \"%s\" folder (%s)... "
-                          % (name, flag, file_size), end="", flush=True)
-                elif 'pass' in file.name:
-                    print("Parsing sample \"%s\" from \"%s\" folder (%s)..."
-                          % (name, flag, file_size), end="", flush=True)
-                else:
-                    print("Parsing sample \"%s\" from \"%s\" folder (%s). Assuming \"pass\" reads..."
-                          % (name, flag, file_size), end="", flush=True)
+                    flag = 'pass'  # Default value
+                    if 'fail' in file.name:
+                        flag = 'fail'  # Check in path for the word "fail"
+                        print("Parsing sample \"%s\" from \"%s\" folder (%s)... "
+                              % (name, flag, file_size), end="", flush=True)
+                    elif 'pass' in file.name:
+                        print("Parsing sample \"%s\" from \"%s\" folder (%s)..."
+                              % (name, flag, file_size), end="", flush=True)
+                    else:
+                        print("Parsing sample \"%s\" from \"%s\" folder (%s). Assuming \"pass\" reads..."
+                              % (name, flag, file_size), end="", flush=True)
 
-                lines = list()
-                for line in file:
-                    lines.append(line.rstrip())
-                    if len(lines) == 4:
-                        header, seq, extra, qual = lines  # get each component in a variable
-                        # Sequence ID
-                        seqid = header.split()[0][1:]
-                        # Read Time stamp
-                        try:
-                            time_string = header.split()[4].split('=')[1]
-                        except IndexError:
-                            print(seqid)
-                        #Sequence length
-                        length = len(seq)
-                        # Average phred score
-                        phred_list = list()
-                        for letter in qual:
-                            phred_list.append(ord(letter))
-                        average_phred = int(np.round(np.mean(phred_list)) - 33)
-                        # GC percentage
-                        gc = int(round((sum([1.0 for nucl in seq if nucl in ['G', 'C']]) / len(seq)) * 100))
+                    lines = list()
+                    read_counter = 0
+                    for line in iter(mm.readline, ""):
+                        lines.append(line.rstrip())
+                        if not line:
+                            break
+                        if len(lines) == 4:
+                            read_counter += 1
+                            header, seq, extra, qual = lines  # get each component in a variable
+                            # Sequence ID
+                            try:
+                                seqid = header.split()[0][1:]
+                            except IndexError:
+                                continue
+                            # Read Time stamp   #
+                            try:
+                                time_string = header.split()[4].split(b'=')[1]
+                            except IndexError:
+                                continue
+                            # Sequence length
+                            length = len(seq)
+                            if length == 0:
+                                continue
+                            # Average phred score
+                            phred_list = list()
+                            for letter in qual:
+                                phred_list.append(letter)
+                            average_phred = int(np.round(np.mean(phred_list)) - 33)
+                            # GC percentage
+                            g_count = float(seq.count(b'G'))
+                            c_count = float(seq.count(b'C'))
+                            gc = int(round((g_count + c_count) / float(length) * 100))
 
-                        # Add to dictionary
-                        d[name][seqid]['datetime'] = parse(time_string)  # 2018-05-04T03:14:13Z
-                        d[name][seqid]['length'] = length
-                        d[name][seqid]['quality'] = average_phred
-                        d[name][seqid]['flag'] = flag
-                        d[name][seqid]['gc'] = gc
+                            # Add to dictionary
+                            d[name][seqid]['datetime'] = parse(time_string)  # 2018-05-04T03:14:13Z
+                            d[name][seqid]['length'] = length
+                            d[name][seqid]['quality'] = average_phred
+                            d[name][seqid]['flag'] = flag
+                            d[name][seqid]['gc'] = gc
 
-                        lines = []  # empty list
+                            lines = []  # empty list
 
-                end_time = time()
-                interval = end_time - start_time
-                print("took %s" % self.elapsed_time(interval))
+                    end_time = time()
+                    interval = end_time - start_time
+                    print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
 
-    def graph_read_number(self, d):
+    def make_plots(self):
+        d = self.sample_dict
+        self.plot_total_reads_vs_time(d)
+        self.plot_reads_per_sample_vs_time(d)
+        self.plot_bp_per_sample_vs_time(d)
+        self.plot_total_bp_vs_time(d)
+        self.plot_quality_vs_time(d)
+        self.plot_phred_score_distribution(d)
+        self.plot_quality_vs_length(d)
+
+    def plot_total_reads_vs_time(self, d):
         """
         Plot number of reads against running time. Both Pass and fail reads in the same graph
         :param d: A dictionary to store the relevant information about each sequence
@@ -131,8 +175,6 @@ class NanoQC(object):
         TODO -> use numpy to handle the plot data, on row per sample?
         TODO -> what if just fail reads? Adapt code!
         """
-
-        import matplotlib.pyplot as plt
 
         #
         # Total yield, all samples combined
@@ -180,11 +222,15 @@ class NanoQC(object):
         else:
             ax.legend(['Pass'])
         ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Total read yield')
+        plt.tight_layout()
         fig.savefig(self.output_folder + "/total_reads_vs_time.png")
 
-        #
-        # Yield per sample (stack plot), just the pass reads
-        #
+    def plot_reads_per_sample_vs_time(self, d):
+        """
+        Plot yield per sample. Just the pass reads
+        :param d: Dictionary
+        :return: png file
+        """
 
         fig, ax = plt.subplots()
         plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
@@ -204,17 +250,21 @@ class NanoQC(object):
             ax.plot(ts_pass, ys_pass)
             ax.legend(legend_names)
         ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Read yield per sample')
-        ax.ticklabel_format(style='sci')
+        ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        # comma-separated numbers to the y axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()  #
         fig.savefig(self.output_folder + "/reads_per_sample_vs_time.png")
 
-        #
-        # Read length per sample vs time
-        #
+    def plot_bp_per_sample_vs_time(self, d):
+        """
+        Read length per sample vs time
+        :param d: Dictionary
+        :return: png file
+        """
 
-        fig, ax = plt.subplots()
-        legend_names = list()
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
         for name in d:
-            legend_names.append(name)
             ts_pass = list()
             for seqid in d[name]:
                 ts = d[name][seqid]['datetime']
@@ -238,20 +288,25 @@ class NanoQC(object):
                 c = y
 
             # Plot values per sample
-            ax.plot(x_values, y_values)
+            ax.plot(x_values, y_values,
+                    label="%s (%sbp)" % (name, "{:,}".format(max(y_values))))
 
-        ax.legend(legend_names)
+        # ax.legend(legend_names, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)  # New
         # Add axes labels
         ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Yield per sample in base pair\n("pass" only)')
         # ax.ticklabel_format(useOffset=False)  # Disable the offset on the x-axis
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
-
+        plt.tight_layout()
         # Save figure to file
         fig.savefig(self.output_folder + "/bp_per_sample_vs_time.png")
 
-        #
-        # Sequence length vs time
-        #
+    def plot_total_bp_vs_time(self, d):
+        """
+        Sequence length vs time
+        :param d: Dictionary
+        :return: png file
+        """
 
         fig, ax = plt.subplots()
         ts_pass = list()
@@ -294,13 +349,18 @@ class NanoQC(object):
         ax.plot(x_fail_values, y_fail_values, color='red')
         ax.legend(['Pass', 'Fail'])
         ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Total yield in base pair')
+        ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        plt.tight_layout()
         fig.savefig(self.output_folder + "/total_bp_vs_time.png")
 
-        #
-        # Quality vs time
-        #
+    def plot_quality_vs_time(self, d):
+        """
+        Quality vs time (bins of 1h). Violin plot
+        :param d: Dictionary
+        :return: png file
+        """
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(10, 4))
         ts_pass = list()
         ts_fail = list()
         for name in d:
@@ -317,25 +377,33 @@ class NanoQC(object):
         ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
         ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
         ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
-        x_pass_values = [x for x, y in ts_pass2]
-        y_pass_values = [y for x, y in ts_pass2]
+        ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
 
         ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
         ts_fail1.sort(key=lambda x: x[0])
         ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
-        x_fail_values = [x for x, y in ts_fail2]
-        y_fail_values = [y for x, y in ts_fail2]
+        ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
 
-        # Print plot
-        ax.plot(x_pass_values, y_pass_values, color='blue')
-        ax.plot(x_fail_values, y_fail_values, color='red', alpha=0.5)
-        ax.legend(['Pass', 'Fail'])
-        ax.set(xlabel='Time (h)', ylabel='Phred score', title='Read quality evolution')
+        df_pass = pd.DataFrame(list(ts_pass3), columns=['Time (h)', 'Phred Score'])  # Convert to dataframe
+        df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+
+        df_fail = pd.DataFrame(list(ts_fail3), columns=['Time (h)', 'Phred Score'])
+        df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        frames = [df_pass, df_fail]
+        data = pd.concat(frames)  # Merge dataframes
+
+        sns.violinplot(x='Time (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
+
+        plt.tight_layout()
         fig.savefig(self.output_folder + "/quality_vs_time.png")
 
-        #
-        # Frequency of phred scores
-        #
+    def plot_phred_score_distribution(self, d):
+        """
+        Frequency of phred scores
+        :param d: Dictionary
+        :return: png file
+        """
 
         fig, ax = plt.subplots()
         qual_pass = list()
@@ -347,18 +415,37 @@ class NanoQC(object):
                     qual_pass.append(qual)
                 else:
                     qual_fail.append(qual)
-        mean_pass_qual = np.round(np.mean(qual_pass), 1)
-        mean_fail_qual = np.round(np.mean(qual_fail), 1)
+        if qual_fail:  # assume "pass" always present
+            mean_pass_qual = np.round(np.mean(qual_pass), 1)
+            mean_fail_qual = np.round(np.mean(qual_fail), 1)
+        elif qual_pass:
+            mean_pass_qual = np.round(np.mean(qual_pass), 1)
+        else:
+            print("No reads detected!")
+            return
 
         # Print plot
-        ax.hist([qual_pass, qual_fail],
-                bins=np.arange(min(min(qual_pass), min(qual_fail)) - 1, max(max(qual_pass), max(qual_fail)) + 1),
-                color=['blue', 'red'],
-                label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
+        if qual_fail:
+            ax.hist([qual_pass, qual_fail],
+                    bins=np.arange(min(min(qual_pass), min(qual_fail)) - 1, max(max(qual_pass), max(qual_fail)) + 1),
+                    color=['blue', 'red'],
+                    label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
+        else:
+            ax.hist(qual_pass,
+                    bins=np.arange(min(qual_pass) - 1, max(qual_pass) + 1),
+                    color='blue',
+                    label="pass (Avg: %s)" % mean_pass_qual)
         plt.legend()
         ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
-        fig.savefig(self.output_folder + "/phred_score distribution.png")
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/phred_score_distribution.png")
 
+    def plot_length_distribution(self, d):
+        """
+        Frequency of sizes. Bins auto-sized based on length distribution. Log scale x-axis.
+        :param d: Dictionary
+        :return: png file
+        """
         #
         # Frequency of sizes (bins of 1kb). Log scale
         #
@@ -372,29 +459,63 @@ class NanoQC(object):
                     size_pass.append(size)
                 else:
                     size_fail.append(size)
-        min_len = min(min(size_pass), min(size_fail))
-        max_len = max(max(size_pass), max(size_fail))
-        mean_pass_size = np.round(np.mean(size_pass), 1)
-        mean_fail_size = np.round(np.mean(size_fail), 1)
+        if size_fail:  # assume "pass" always present
+            min_len = min(min(size_pass), min(size_fail))
+            max_len = max(max(size_pass), max(size_fail))
+            mean_pass_size = np.round(np.mean(size_pass), 1)
+            mean_fail_size = np.round(np.mean(size_fail), 1)
+        elif size_pass:
+            min_len = min(size_pass)
+            max_len = max(size_pass)
+            mean_pass_size = np.round(np.mean(size_pass), 1)
+        else:
+            print("No reads detected!")
+            return
 
         # Print plot
         fig, ax = plt.subplots()
         binwidth = int(np.round(10 * np.log10(max_len - min_len)))
         logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
-        plt.hist([size_pass, size_fail],
-                bins=logbins,
-                color=['blue', 'red'],
-                 label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
+        if size_fail:
+            plt.hist([size_pass, size_fail],
+                    bins=logbins,
+                    color=['blue', 'red'],
+                     label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
+        else:
+            plt.hist(size_pass, bins=logbins, color='blue', label="pass (Avg: %s)" % mean_pass_size)
         plt.legend()
         plt.xscale('log')
         ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
+        plt.tight_layout()
         fig.savefig(self.output_folder + "/length_distribution.png")
 
-        #
-        # Heat map (length vs quality)
-        #
+    def plot_quality_vs_length(self, d):
+        """
+        Heat map (length vs quality)
+        :param d: Dictionary
+        :return: png file
+        """
 
-        # fig, ax = plt.subplots()
+        qs_pass = list()
+        for name in d:
+            for seqid in d[name]:
+                qual = d[name][seqid]['quality']
+                size = d[name][seqid]['length']
+                if d[name][seqid]['flag'] == "pass":
+                    qs_pass.append(tuple((size, qual)))
+
+        df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+
+        # kde -> kernel density estimation
+        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
+                          stat_func=None,
+                          xlim=[pd.DataFrame.min(df_pass['Length (bp)']), pd.DataFrame.max(df_pass['Length (bp)'])],
+                          space=0, size=8)
+        ax = g.ax_joint
+        ax.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+
+        g.savefig(self.output_folder + "/quality_vs_length.png")
 
 
 if __name__ == '__main__':
