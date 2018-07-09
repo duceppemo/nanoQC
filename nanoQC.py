@@ -17,6 +17,7 @@ __author__ = 'duceppemo'
 # TODO -> parse the fastq file if parallel, if gives a performance gain
 #         Either share dictionary across threads, or create one dictonary per thread and merge at the end???
 # TODO -> make compatible with gzipped files. YOu can't memory map the content of a compressed file!!!
+# TODO -> Add a function to rename the samples with a converstion table (two-column tab-separated file)
 
 class NanoQC(object):
 
@@ -43,7 +44,11 @@ class NanoQC(object):
     def run(self):
         """Run everything"""
         self.parse_fastq(self.input_fastq_list, self.sample_dict)
-        print("\nMaking plots...")
+
+        # Check if there is data
+        if not self.sample_dict:
+            raise Exception('No data!')
+
         self.make_plots()
 
     def hbytes(self, num):
@@ -71,13 +76,14 @@ class NanoQC(object):
         time_string = ''.join('{}{}'.format(int(np.round(value)), name) for name, value in periods if value)
         return time_string
 
-    def parse_fastq(self, f, d):
+    def parse_fastq(self, l, d):
         """
         Parse a basecalled nanopore fastq file by Albacore into a dictionary.
         Multiple fastq files shall be from the same sequencing run.
         :param f: A basecalled nanopore fastq file.
-        :param d: A dictionary to store the relevant information about each sequence and sample
-        :return: An update dictionary
+        :param d: an expty dictionary
+        :return: A dictionary with the time stamp, length, average quality, pass/fail flag and gc %
+                 for each read of each sample
         https://www.biostars.org/p/317524/
         http://www.blopig.com/blog/2016/08/processing-large-files-using-python/
         """
@@ -85,7 +91,8 @@ class NanoQC(object):
         import gzip
         import mmap
 
-        for f in self.input_fastq_list:
+        # TODO -> make compatible with qzip files (maybe a system call to "pigz -d -k -f > /tmp/basename.fastq")
+        for f in l:
             with gzip.open(f, 'rb') if f.endswith('gz') else open(f, 'r') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                     # if f.name.endswith('gz'):
@@ -96,8 +103,8 @@ class NanoQC(object):
                     name = file.name.split('/')[-2]  # Parent folder name
 
                     # get some stats about the input file
-                    statinfo = os.stat(file.name)
-                    file_size = self.hbytes(statinfo.st_size)
+                    stat_info = os.stat(file.name)
+                    file_size = self.hbytes(stat_info.st_size)
 
                     flag = 'pass'  # Default value
                     if 'fail' in file.name:
@@ -159,6 +166,8 @@ class NanoQC(object):
                     print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
 
     def make_plots(self):
+        print("\nMaking plots...", end="", flush=True)
+        start_time = time()
         d = self.sample_dict
         self.plot_total_reads_vs_time(d)
         self.plot_reads_per_sample_vs_time(d)
@@ -167,6 +176,9 @@ class NanoQC(object):
         self.plot_quality_vs_time(d)
         self.plot_phred_score_distribution(d)
         self.plot_quality_vs_length(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
     def plot_total_reads_vs_time(self, d):
         """
@@ -174,7 +186,6 @@ class NanoQC(object):
         :param d: A dictionary to store the relevant information about each sequence
         :return: A png file with the graph
         TODO -> use numpy to handle the plot data, on row per sample?
-        TODO -> what if just fail reads? Adapt code!
         """
 
         #
@@ -192,36 +203,51 @@ class NanoQC(object):
                 else:
                     t_fail.append(t)
 
-        # Convert time object in hours from beginning of run
-        t_zero_pass = min(t_pass)
-
         # Find the smallest datetime value
+        if t_pass:
+            t_zero_pass = min(t_pass)
+
         if t_fail:
             t_zero_fail = min(t_fail)
+
+        if t_pass and t_fail:
             t_zero = min(t_zero_pass, t_zero_fail)
-        else:
+        elif t_pass:
             t_zero = t_zero_pass
+        elif t_fail:
+            t_zero = t_zero_fail
+        else:
+            raise Exception('No data!')
 
         # Prepare datetime value for plotting
-        t_pass[:] = [x - t_zero for x in t_pass]  # Subtract t_zero for the all time points
-        t_pass.sort()  # Sort
-        t_pass[:] = [x.days * 24 + x.seconds / 3600 for x in t_pass]  # Convert to hours (float)
-        y_pass = range(1, len(t_pass) + 1, 1)  # Create range. 1 time point equals 1 read
+        # Convert time object in hours from beginning of run
+        if t_pass:
+            t_pass[:] = [x - t_zero for x in t_pass]  # Subtract t_zero for the all time points
+            t_pass.sort()  # Sort
+            t_pass[:] = [x.days * 24 + x.seconds / 3600 for x in t_pass]  # Convert to hours (float)
+            y_pass = range(1, len(t_pass) + 1, 1)  # Create range. 1 time point equals 1 read
 
-        y_fail = list()
         if t_fail:
-            t_fail[:] = [x - t_zero for x in t_fail]
-            t_fail.sort()
-            t_fail[:] = [x.days * 24 + x.seconds / 3600 for x in t_fail]
-            y_fail = range(1, len(t_fail) + 1, 1)
+            y_fail = list()
+            if t_fail:
+                t_fail[:] = [x - t_zero for x in t_fail]
+                t_fail.sort()
+                t_fail[:] = [x.days * 24 + x.seconds / 3600 for x in t_fail]
+                y_fail = range(1, len(t_fail) + 1, 1)
 
         # Create plot
-        ax.plot(t_pass, y_pass, color='blue')
-        if t_fail:
+        if t_pass and t_fail:
+            ax.plot(t_pass, y_pass, color='blue')
             ax.plot(t_fail, y_fail, color='red')
             ax.legend(['Pass', 'Fail'])
-        else:
+        elif t_pass:
+            ax.plot(t_pass, y_pass, color='blue')
             ax.legend(['Pass'])
+        elif t_fail:
+            ax.plot(t_fail, y_fail, color='red')
+            ax.legend(['Fail'])
+
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Total read yield')
         plt.tight_layout()
         fig.savefig(self.output_folder + "/total_reads_vs_time.png")
@@ -243,6 +269,8 @@ class NanoQC(object):
                 ts = d[name][seqid]['datetime']
                 if d[name][seqid]['flag'] == "pass":
                     ts_pass.append(ts)
+            if not ts_pass:
+                return
             ts_zero = min(ts_pass)
             ts_pass[:] = [x - ts_zero for x in ts_pass]  # Subtract t_zero for the all time points
             ts_pass.sort()  # Sort
@@ -273,6 +301,8 @@ class NanoQC(object):
                 if d[name][seqid]['flag'] == "pass":
                     ts_pass.append(tuple((ts, length)))
 
+            if not ts_pass:
+                return
             # Prepare x values (time)
             ts_zero = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
             ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
@@ -298,6 +328,7 @@ class NanoQC(object):
         ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Yield per sample in base pair\n("pass" only)')
         # ax.ticklabel_format(useOffset=False)  # Disable the offset on the x-axis
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
         # Save figure to file
         fig.savefig(self.output_folder + "/bp_per_sample_vs_time.png")
@@ -321,36 +352,56 @@ class NanoQC(object):
                 else:
                     ts_fail.append(tuple((ts, l)))
 
-        ts_zero = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+        if ts_pass:
+            ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
-        ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
-        ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
-        ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
-        x_pass_values = [x for x, y in ts_pass2]
-        c = 0
-        y_pass_values = list()
-        for x, y in ts_pass2:
-            y = y + c
-            y_pass_values.append(y)
-            c = y
+        if ts_fail:
+            ts_zero_fail = min(ts_fail, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
-        ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
-        ts_fail1.sort(key=lambda x: x[0])
-        ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
-        x_fail_values = [x for x, y in ts_fail2]
-        c = 0
-        y_fail_values = list()
-        for x, y in ts_fail2:
-            y = y + c
-            y_fail_values.append(y)
-            c = y
+        if ts_pass and ts_fail:
+            ts_zero = min(ts_zero_pass, ts_zero_fail)
+        elif ts_pass:
+            ts_zero = ts_zero_pass
+        else:  # elif ts_fail:
+            ts_zero = ts_zero_fail
+
+        if ts_pass:
+            ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
+            ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+            ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
+            x_pass_values = [x for x, y in ts_pass2]
+            c = 0
+            y_pass_values = list()
+            for x, y in ts_pass2:
+                y = y + c
+                y_pass_values.append(y)
+                c = y
+        if ts_fail:
+            ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
+            ts_fail1.sort(key=lambda x: x[0])
+            ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
+            x_fail_values = [x for x, y in ts_fail2]
+            c = 0
+            y_fail_values = list()
+            for x, y in ts_fail2:
+                y = y + c
+                y_fail_values.append(y)
+                c = y
 
         # Print plot
-        ax.plot(x_pass_values, y_pass_values, color='blue')
-        ax.plot(x_fail_values, y_fail_values, color='red')
-        ax.legend(['Pass', 'Fail'])
+        if ts_pass and ts_fail:
+            ax.plot(x_pass_values, y_pass_values, color='blue')
+            ax.plot(x_fail_values, y_fail_values, color='red')
+            ax.legend(['Pass', 'Fail'])
+        elif ts_pass:
+            ax.plot(x_pass_values, y_pass_values, color='blue')
+            ax.legend(['Pass'])
+        else:  # elif ts_fail:
+            ax.plot(x_fail_values, y_fail_values, color='red')
+            ax.legend(['Fail'])
         ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Total yield in base pair')
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
         fig.savefig(self.output_folder + "/total_bp_vs_time.png")
 
@@ -373,28 +424,58 @@ class NanoQC(object):
                 else:
                     ts_fail.append(tuple((ts, l)))
 
-        ts_zero = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+        if ts_pass:
+            ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
-        ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
-        ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
-        ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
-        ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
+        if ts_fail:
+            ts_zero_fail = min(ts_fail, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
-        ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
-        ts_fail1.sort(key=lambda x: x[0])
-        ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
-        ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
+        if ts_pass and ts_fail:
+            ts_zero = min(ts_zero_pass, ts_zero_fail)
+        elif ts_pass:
+            ts_zero = ts_zero_pass
+        else:  # elif ts_fail:
+            ts_zero = ts_zero_fail
 
-        df_pass = pd.DataFrame(list(ts_pass3), columns=['Time (h)', 'Phred Score'])  # Convert to dataframe
-        df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+        ts_pass3 = list()
+        ts_fail3 = list()
+        if ts_pass:
+            ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
+            ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+            ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
+            ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
 
-        df_fail = pd.DataFrame(list(ts_fail3), columns=['Time (h)', 'Phred Score'])
-        df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+            df_pass = pd.DataFrame(list(ts_pass3), columns=['Time (h)', 'Phred Score'])  # Convert to dataframe
+            df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
-        frames = [df_pass, df_fail]
-        data = pd.concat(frames)  # Merge dataframes
+        if ts_fail:
+            ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
+            ts_fail1.sort(key=lambda x: x[0])
+            ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
+            ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
 
-        sns.violinplot(x='Time (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
+            df_fail = pd.DataFrame(list(ts_fail3), columns=['Time (h)', 'Phred Score'])
+            df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        # Account if there is no fail data or no pass data
+        if ts_fail3 and ts_pass3:
+            frames = [df_pass, df_fail]
+            data = pd.concat(frames)  # Merge dataframes
+        elif ts_pass3:
+            data = df_pass
+        else:  # elif ts_fail3:
+            data = df_fail
+
+        # Account if there is no fail data or no pass data
+        if ts_fail3 and ts_pass3:
+            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
+            g.figure.suptitle('Phred score evolution')
+        elif ts_pass3:
+            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, inner=None)
+            g.figure.suptitle('Phred score evolution\n(pass)')
+        else:  # elif ts_fail3:
+            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, inner=None)
+            g.figure.suptitle('Phred score evolution\n(fail)')
 
         plt.tight_layout()
         fig.savefig(self.output_folder + "/quality_vs_time.png")
@@ -416,26 +497,29 @@ class NanoQC(object):
                     qual_pass.append(qual)
                 else:
                     qual_fail.append(qual)
-        if qual_fail:  # assume "pass" always present
+
+        if qual_pass:
             mean_pass_qual = np.round(np.mean(qual_pass), 1)
+
+        if qual_fail:
             mean_fail_qual = np.round(np.mean(qual_fail), 1)
-        elif qual_pass:
-            mean_pass_qual = np.round(np.mean(qual_pass), 1)
-        else:
-            print("No reads detected!")
-            return
 
         # Print plot
-        if qual_fail:
+        if qual_pass and qual_fail:
             ax.hist([qual_pass, qual_fail],
-                    bins=np.arange(min(min(qual_pass), min(qual_fail)) - 1, max(max(qual_pass), max(qual_fail)) + 1),
+                    bins=np.arange(min(min(qual_pass), min(qual_fail)), max(max(qual_pass), max(qual_fail))),
                     color=['blue', 'red'],
                     label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
-        else:
+        elif qual_pass:
             ax.hist(qual_pass,
-                    bins=np.arange(min(qual_pass) - 1, max(qual_pass) + 1),
+                    bins=np.arange(min(qual_pass), max(qual_pass)),
                     color='blue',
                     label="pass (Avg: %s)" % mean_pass_qual)
+        else:
+            ax.hist(qual_fail,
+                    bins=np.arange(min(qual_fail), max(qual_fail)),
+                    color='red',
+                    label="fail (Avg: %s)" % mean_fail_qual)
         plt.legend()
         ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
         plt.tight_layout()
@@ -492,10 +576,12 @@ class NanoQC(object):
 
     def plot_quality_vs_length(self, d):
         """
-        Heat map (length vs quality)
+        seaborn jointplot (length vs quality)
         :param d: Dictionary
         :return: png file
         """
+
+        from math import ceil, floor
 
         qs_pass = list()
         for name in d:
@@ -505,12 +591,27 @@ class NanoQC(object):
                 if d[name][seqid]['flag'] == "pass":
                     qs_pass.append(tuple((size, qual)))
 
+        if not qs_pass:
+            return
+
         df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
 
         # kde -> kernel density estimation
+        # g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
+        #                   stat_func=None,
+        #                   xlim=[pd.DataFrame.min(df_pass['Length (bp)']), pd.DataFrame.max(df_pass['Length (bp)'])],
+        #                   space=0)
+        min_len = pd.DataFrame.min(df_pass['Length (bp)'])
+        min_exp = np.log10(min_len)
+        min_value = float(10**(floor(min_exp)))
+        if min_value == 0:
+            min_value = 1
+        max_len = pd.DataFrame.max(df_pass['Length (bp)'])
+        max_exp = np.log10(max_len)
+        max_value = float(10**(ceil(max_exp)))
         g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
                           stat_func=None,
-                          xlim=[pd.DataFrame.min(df_pass['Length (bp)']), pd.DataFrame.max(df_pass['Length (bp)'])],
+                          xlim=[min_value, max_value],
                           space=0)
         ax = g.ax_joint
         ax.set_xscale('log')
