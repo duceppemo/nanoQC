@@ -1,7 +1,7 @@
 #!/usr/local/env python3
 
 from nested_dict import nested_dict
-import os.path
+import os
 import glob
 import numpy as np
 from time import time
@@ -13,11 +13,15 @@ import seaborn as sns
 __author__ = 'duceppemo'
 
 
-# TODO -> make sure it all run nice if only pass present, if only fail present or both are present
 # TODO -> parse the fastq file if parallel, if gives a performance gain
-#         Either share dictionary across threads, or create one dictonary per thread and merge at the end???
-# TODO -> make compatible with gzipped files. YOu can't memory map the content of a compressed file!!!
-# TODO -> Add a function to rename the samples with a converstion table (two-column tab-separated file)
+#         Either share dictionary across threads, or create one dictionary per thread and merge at the end???
+# TODO -> Add a function to rename the samples with a conversion table (two-column tab-separated file)
+# TODO -> make proper log file
+# TODO -> check if output folder exists, create it if not
+# TODO -> check for dependencies (e.g. pigz)
+# TODO -> unit testing
+# TODO -> benchmark using gzip library to decompress versus pigz system call
+
 
 class NanoQC(object):
 
@@ -80,20 +84,35 @@ class NanoQC(object):
         """
         Parse a basecalled nanopore fastq file by Albacore into a dictionary.
         Multiple fastq files shall be from the same sequencing run.
-        :param f: A basecalled nanopore fastq file.
-        :param d: an expty dictionary
+        :param l: A list of fastq files.
+        :param d: An empty dictionary
         :return: A dictionary with the time stamp, length, average quality, pass/fail flag and gc %
                  for each read of each sample
         https://www.biostars.org/p/317524/
         http://www.blopig.com/blog/2016/08/processing-large-files-using-python/
         """
         from dateutil.parser import parse
-        import gzip
+        import subprocess
         import mmap
 
-        # TODO -> make compatible with qzip files (maybe a system call to "pigz -d -k -f > /tmp/basename.fastq")
         for f in l:
-            with gzip.open(f, 'rb') if f.endswith('gz') else open(f, 'r') as file:
+            filename = os.path.basename(f)
+            filename_no_gz = '.'.join(filename.split('.')[:-1])
+            gz_flag = 0
+
+            if f.endswith('.fastq.gz'):
+                p1 = subprocess.Popen(['pigz', '-d', '-k', '-f', '-c', f], stdout=subprocess.PIPE)
+                (outs, errs) = p1.communicate()
+                with open('/tmp/' + filename_no_gz, 'b+w') as tmp_file:
+                    tmp_file.write(outs)
+                f = "/tmp/" + filename_no_gz
+                gz_flag = 1
+            if f.endswith(".fastq"):
+                pass
+            else:
+                raise Exception('Wrong file extension. Please use ".fastq" or ".fastq.gz"')
+
+            with open(f, 'r') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                     # if f.name.endswith('gz'):
                     #     gzip.GzipFile(mode='r', fileobj=mm)
@@ -164,6 +183,10 @@ class NanoQC(object):
                     end_time = time()
                     interval = end_time - start_time
                     print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+
+            #  Remove tmp file
+            if gz_flag == 1:
+                os.remove('/tmp/' + filename_no_gz)
 
     def make_plots(self):
         print("\nMaking plots...", end="", flush=True)
@@ -352,6 +375,8 @@ class NanoQC(object):
                 else:
                     ts_fail.append(tuple((ts, l)))
 
+        ts_zero_pass = list()
+        ts_zero_fail = list()
         if ts_pass:
             ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
@@ -563,8 +588,8 @@ class NanoQC(object):
         logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
         if size_fail:
             plt.hist([size_pass, size_fail],
-                    bins=logbins,
-                    color=['blue', 'red'],
+                     bins=logbins,
+                     color=['blue', 'red'],
                      label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
         else:
             plt.hist(size_pass, bins=logbins, color='blue', label="pass (Avg: %s)" % mean_pass_size)
@@ -596,11 +621,6 @@ class NanoQC(object):
 
         df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
 
-        # kde -> kernel density estimation
-        # g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
-        #                   stat_func=None,
-        #                   xlim=[pd.DataFrame.min(df_pass['Length (bp)']), pd.DataFrame.max(df_pass['Length (bp)'])],
-        #                   space=0)
         min_len = pd.DataFrame.min(df_pass['Length (bp)'])
         min_exp = np.log10(min_len)
         min_value = float(10**(floor(min_exp)))
