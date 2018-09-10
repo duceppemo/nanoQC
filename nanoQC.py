@@ -1,26 +1,30 @@
 #!/usr/local/env python3
 
-from nested_dict import nested_dict
 import os
-import glob
+import sys
 import numpy as np
 from time import time
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+import multiprocessing as mp
+from dateutil.parser import parse
+import logging
+import collections
 
 
 __author__ = 'duceppemo'
+__version__ = '0.2'
 
 
 # TODO -> parse the fastq file if parallel, if gives a performance gain
 #         Either share dictionary across threads, or create one dictionary per thread and merge at the end???
 # TODO -> Add a function to rename the samples with a conversion table (two-column tab-separated file)
 # TODO -> make proper log file
-# TODO -> check if output folder exists, create it if not
 # TODO -> check for dependencies (e.g. pigz)
 # TODO -> unit testing
 # TODO -> benchmark using gzip library to decompress versus pigz system call
+# TODO -> add option to use the "sequencing_summary.txt" file as input instead of the fastq files
 
 
 class NanoQC(object):
@@ -29,31 +33,93 @@ class NanoQC(object):
 
         """Define objects based on supplied arguments"""
         self.args = args
-        self.input_folder = args.input
+        self.input_folder = args.fastq
+        self.input_summary = args.summary
         self.output_folder = args.output
 
         # Shared data structure(s)
-        # self.sample_dict = collections.defaultdict(lambda: dict)
-        self.sample_dict = nested_dict()
+        self.sample_dict = dict()
+        self.summary_dict = dict()
+        # self.sample_dict = nested_dict()
+        # self.summary_dict = nested_dict()
 
         # Create a list of fastq files in input folder
         self.input_fastq_list = list()
-        for fastq_file in glob.iglob(self.input_folder + '/**/*fastq*', recursive=True):
-            if os.path.isfile(fastq_file):
-                self.input_fastq_list.append(fastq_file)
+
+        # Threading
+        self.cpu = mp.cpu_count()
 
         # run the script
         self.run()
 
     def run(self):
-        """Run everything"""
-        self.parse_fastq(self.input_fastq_list, self.sample_dict)
+        """
+        Run everything
+        :return:
+        """
 
-        # Check if there is data
-        if not self.sample_dict:
-            raise Exception('No data!')
+        self.check_dependencies()
 
-        self.make_plots()
+        # Check if correct argument combination is being used
+        self.check_args()
+
+        # Select appropriate parser based on input type
+        if self.input_folder:
+            self.parse_fastq(self.input_fastq_list, self.sample_dict)
+
+            # Check if there is data
+            if not self.sample_dict:
+                raise Exception('No data!')
+            else:
+                self.make_fastq_plots()  # make the plots for fastq files
+        else:  # elif self.input_summary:
+            self.parse_summary(self.summary_dict)
+
+            # Check if there is data
+            if not self.summary_dict:
+                raise Exception('No data!')
+
+        import pprint
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(self.sample_dict)
+
+    def check_dependencies(self):
+        pass
+
+    def check_args(self):
+        """
+        Check if correct argument combination is being used
+        Check if output folder exists
+        :return:
+        """
+        import pathlib
+
+        if self.input_folder and self.summary_dict:
+            print('Please use only one input type ("-f" or "-s")')
+            parser.print_help(sys.stderr)
+            sys.exit(1)
+        elif not self.input_folder and not self.input_summary:
+            print('Please use one of the following input types ("-f" or "-s")')
+            parser.print_help(sys.stderr)
+            sys.exit(1)
+
+        if not self.output_folder:
+            print('Please specify an output folder ("-o")')
+            parser.print_help(sys.stderr)
+            sys.exit(1)
+        else:
+            pathlib.Path(self.output_folder).mkdir(parents=True, exist_ok=True)  # Create if if it does not exist
+
+        if self.input_folder:
+            for root, directories, filenames in os.walk(self.input_folder):
+                for filename in filenames:
+                    absolute_path = os.path.join(root, filename)
+                    if os.path.isfile(absolute_path) and filename.endswith(('.fastq','.fastq.gz')):
+                        self.input_fastq_list.append(absolute_path)
+
+            # check if input_fastq_list is not empty
+            if not self.input_fastq_list:
+                raise Exception("No fastq file found in %s!" % self.input_folder)
 
     def hbytes(self, num):
         """
@@ -80,6 +146,125 @@ class NanoQC(object):
         time_string = ''.join('{}{}'.format(int(np.round(value)), name) for name, value in periods if value)
         return time_string
 
+    def optimal_line_number(self, f, cpu):
+        # Determine optimal number of lines in the fastq file to put in a chunk
+        total_lines = 0
+        with open(f, 'rb') as file:
+            while True:
+                buffer = file.read(1024 * 1024 * 8)  # 8 MB buffer
+                if not buffer:
+                    break
+                total_lines += buffer.count(b'\n')
+
+        # make sure its a multiple of 4
+        optimal = int(round(total_lines / cpu, 0))
+        optimal += optimal % 4
+
+        return optimal
+
+    # Iterator that yields start and end locations of a file chunk of default size 1MB.
+    def chunkify(self, f, size=1024 * 1024):
+        file_end = os.path.getsize(f)
+        with open(f, 'rb', 1024 * 1024) as file:
+            chunk_end = file.tell()
+            while True:
+                chunk_start = chunk_end
+                file.seek(size, 1)
+                self._EOC(file)
+                chunk_end = file.tell()
+                yield chunk_start, chunk_end - chunk_start
+                if chunk_end >= file_end:
+                    break
+
+    # read chunk
+    def read(self, f, chunk):
+        with open(f, 'rb') as file:
+            file.seek(chunk[0])
+            return file.read(chunk[1])
+
+    # End of chunk
+    def _EOC(self, file):
+        l = file.readline()  # incomplete line
+        p = file.tell()
+        l = file.readline()
+        while l and b'runid' not in l:  # find the start of sequence
+            p = file.tell()
+            l = file.readline()
+        file.seek(p)  # revert one line
+
+    def parse_fastq_to_dict(self, l, my_dict, name, flag):
+        header, seq, extra, qual = l  # get each component od list in a variable
+
+        # Sequence ID
+        seq_id = header.split()[0][1:]
+
+        # Read Time stamp
+        time_string = header.split()[4].split(b'=')[1]
+        time_string = parse(time_string)
+
+        # Sequence length
+        length = len(seq)
+
+        # Average phred score
+        phred_list = list()
+        for letter in qual:
+            phred_list.append(letter)
+        average_phred = sum(phred_list) / len(phred_list) - 33
+        average_phred = round(average_phred, 1)
+
+        # GC percentage
+        g_count = float(seq.count(b'G'))
+        c_count = float(seq.count(b'C'))
+        gc = int(round((g_count + c_count) / float(length) * 100))
+
+        # Add to dictionary
+        if name not in my_dict:  # empty dictionary
+            my_dict[name] = {}
+        if seq_id not in my_dict[name]:
+            my_dict[name][seq_id] = {}
+
+        my_dict[name][seq_id]['length'] = length
+        my_dict[name][seq_id]['quality'] = average_phred
+        my_dict[name][seq_id]['flag'] = flag
+        my_dict[name][seq_id]['gc'] = gc
+        my_dict[name][seq_id]['datetime'] = time_string  # 2018-05-04T03:14:13Z
+
+    def get_chunk_data(self, f, name, flag, chunk):
+        my_dict = {}
+
+        while True:
+            data = self.read(f, chunk)
+            lines = []
+            my_data = data.split(b'\n')
+
+            for line in my_data:
+                if not line:  # end of file?
+                    break
+                line = line.rstrip()
+
+                if lines and b'runid' in line:  # new entry
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
+
+            return my_dict
+
+    def update_nested_dict(self, original_dict, new_dict):
+        """Update the dictionary and its nested dictionary fields."""
+        # Using our own stack to avoid recursion.
+        stack = [(original_dict, new_dict)]
+        while stack:
+            original_dict, new_dict = stack.pop()
+            for key, value in new_dict.items():
+                if isinstance(value, collections.Mapping):
+                    original_dict.setdefault(key, {})
+                    stack.append((original_dict[key], value))
+                else:
+                    original_dict[key] = value
+
+        return original_dict
+
     def parse_fastq(self, l, d):
         """
         Parse a basecalled nanopore fastq file by Albacore into a dictionary.
@@ -91,14 +276,34 @@ class NanoQC(object):
         https://www.biostars.org/p/317524/
         http://www.blopig.com/blog/2016/08/processing-large-files-using-python/
         """
-        from dateutil.parser import parse
+
         import subprocess
-        import mmap
 
         for f in l:
+            name = os.path.basename(f).split('.')[0].split('_')[0]  # basename before 1st "_" -> sample name
+            # name = file.name.split('/')[-2]  # Parent folder name
+
+            # get some stats about the input file
+            stat_info = os.stat(f)
+            file_size = self.hbytes(stat_info.st_size)
+
+            flag = 'pass'  # Default value
+            if 'fail' in f:
+                flag = 'fail'  # Check in path for the word "fail"
+                print("Parsing sample \"%s\" from \"%s\" folder (%s)... "
+                      % (name, flag, file_size), end="", flush=True)
+            elif 'pass' in f:
+                print("Parsing sample \"%s\" from \"%s\" folder (%s)..."
+                      % (name, flag, file_size), end="", flush=True)
+            else:
+                print("Parsing sample \"%s\" from \"%s\" folder (%s). Assuming \"pass\" reads..."
+                      % (name, flag, file_size), end="", flush=True)
+
             filename = os.path.basename(f)
             filename_no_gz = '.'.join(filename.split('.')[:-1])
             gz_flag = 0
+
+            start_time = time()
 
             if f.endswith('.fastq.gz'):
                 p1 = subprocess.Popen(['pigz', '-d', '-k', '-f', '-c', f], stdout=subprocess.PIPE)
@@ -111,97 +316,132 @@ class NanoQC(object):
                 pass
             else:
                 raise Exception('Wrong file extension. Please use ".fastq" or ".fastq.gz"')
+            # Add to dictionary
+            # if name not in d:  # empty dictionary
+            #     d[name] = {}
 
-            with open(f, 'r') as file:
-                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    # if f.name.endswith('gz'):
-                    #     gzip.GzipFile(mode='r', fileobj=mm)
-                    start_time = time()
+            # start_time = time()
+            pool = mp.Pool(self.cpu)
 
-                    # name = os.path.basename(file.name).split('.')[0].split('_')[0]
-                    name = file.name.split('/')[-2]  # Parent folder name
+            jobs = []
+            for chunk in self.chunkify(f):
+                job = pool.apply_async(self.get_chunk_data, args=(f, name, flag, chunk,))
+                jobs.append(job)
 
-                    # get some stats about the input file
-                    stat_info = os.stat(file.name)
-                    file_size = self.hbytes(stat_info.st_size)
+            output = []
+            for job in jobs:
+                output.append(job.get())
 
-                    flag = 'pass'  # Default value
-                    if 'fail' in file.name:
-                        flag = 'fail'  # Check in path for the word "fail"
-                        print("Parsing sample \"%s\" from \"%s\" folder (%s)... "
-                              % (name, flag, file_size), end="", flush=True)
-                    elif 'pass' in file.name:
-                        print("Parsing sample \"%s\" from \"%s\" folder (%s)..."
-                              % (name, flag, file_size), end="", flush=True)
-                    else:
-                        print("Parsing sample \"%s\" from \"%s\" folder (%s). Assuming \"pass\" reads..."
-                              % (name, flag, file_size), end="", flush=True)
+            pool.close()
 
-                    lines = list()
-                    read_counter = 0
-                    for line in iter(mm.readline, ""):
-                        lines.append(line.rstrip())
-                        if not line:
-                            break
-                        if len(lines) == 4:
-                            read_counter += 1
-                            header, seq, extra, qual = lines  # get each component in a variable
-                            # Sequence ID
-                            try:
-                                seqid = header.split()[0][1:]
-                            except IndexError:
-                                continue
-                            # Read Time stamp   #
-                            try:
-                                time_string = header.split()[4].split(b'=')[1]
-                            except IndexError:
-                                continue
-                            # Sequence length
-                            length = len(seq)
-                            if length == 0:
-                                continue
-                            # Average phred score
-                            phred_list = list()
-                            for letter in qual:
-                                phred_list.append(letter)
-                            # average_phred = int(np.round(np.mean(phred_list)) - 33)
-                            average_phred = np.round(np.mean(phred_list), 1) - 33
-                            # GC percentage
-                            g_count = float(seq.count(b'G'))
-                            c_count = float(seq.count(b'C'))
-                            gc = int(round((g_count + c_count) / float(length) * 100))
+            # Merge dictionary
+            reads = 0
+            for dictionary in output:
+                # Count number of reads in the sample
+                for key, value in dictionary.items():
+                    reads += len(value)
+                # d = {**d, **dictionary}  # Do the merge
+                d.update(dictionary)  # Do the merge
+                self.update_nested_dict(d, dictionary)
 
-                            # Add to dictionary
-                            d[name][seqid]['datetime'] = parse(time_string)  # 2018-05-04T03:14:13Z
-                            d[name][seqid]['length'] = length
-                            d[name][seqid]['quality'] = average_phred
-                            d[name][seqid]['flag'] = flag
-                            d[name][seqid]['gc'] = gc
-
-                            lines = []  # empty list
-
-                    end_time = time()
-                    interval = end_time - start_time
-                    print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+            end_time = time()
+            interval = end_time - start_time
+            print("took {} ({} reads)".format(self.elapsed_time(interval), reads))
 
             #  Remove tmp file
             if gz_flag == 1:
                 os.remove('/tmp/' + filename_no_gz)
 
-    def make_plots(self):
-        print("\nMaking plots...", end="", flush=True)
+    def parse_summary(self, d):
+        """
+        Parse "sequencing_summary.txt" file from Albacore
+        :param d: Empty summary dictionary
+        :return: Dictionary with info about
+        """
+
         start_time = time()
+        with open(self.input_summary, 'rb', 8192*1024) as file:
+            fields = list()
+            read_counter = 0
+            next(file)  # skip first line
+            for line in file:
+                line = line.rstrip()
+                fields.append(line.split(b"\t"))
+                if not line:
+                    continue
+
+                # Only keep  fields of interest
+                name = fields[19]
+                seqid = fields[1]
+                channel = fields[3]
+                events = fields[6]
+                start_time = fields[4]
+                flag = fields[7]
+
+                # Populate the dictionary
+                d[name][seqid]['channel'] = channel
+                d[name][seqid]['events'] = events
+                d[name][seqid]['start_time'] = start_time
+                d[name][seqid]['flag'] = flag
+
+        # Print read stats
+        end_time = time()
+        interval = end_time - start_time
+        print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+
+    def make_fastq_plots(self):
+        # print("\nMaking plots...", end="", flush=True)
         d = self.sample_dict
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
         self.plot_total_reads_vs_time(d)
-        self.plot_reads_per_sample_vs_time(d)
-        self.plot_bp_per_sample_vs_time(d)
-        self.plot_total_bp_vs_time(d)
-        self.plot_quality_vs_time(d)
-        self.plot_phred_score_distribution(d)
-        self.plot_quality_vs_length(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_per_sample_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_bp_per_sample_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_bp_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_phred_score_distribution(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_length(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
+        # self.plot_test(d)
 
     def plot_total_reads_vs_time(self, d):
         """
@@ -282,8 +522,9 @@ class NanoQC(object):
         :return: png file
         """
 
-        fig, ax = plt.subplots()
-        plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        # fig, ax = plt.subplots()
+        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
         legend_names = list()
         for name in d:
             legend_names.append(name)
@@ -294,13 +535,20 @@ class NanoQC(object):
                     ts_pass.append(ts)
             if not ts_pass:
                 return
+
             ts_zero = min(ts_pass)
             ts_pass[:] = [x - ts_zero for x in ts_pass]  # Subtract t_zero for the all time points
             ts_pass.sort()  # Sort
             ts_pass[:] = [x.days * 24 + x.seconds / 3600 for x in ts_pass]  # Convert to hours (float)
             ys_pass = range(1, len(ts_pass) + 1, 1)  # Create range. 1 time point equals 1 read
-            ax.plot(ts_pass, ys_pass)
-            ax.legend(legend_names)
+
+            # ax.plot(ts_pass, ys_pass)
+            ax.plot(ts_pass, ys_pass,
+                    label="%s (%s)" % (name, "{:,}".format(max(ys_pass))))
+            # ax.legend(legend_names)
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)  # New
+
         ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Read yield per sample')
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
         # comma-separated numbers to the y axis
@@ -343,7 +591,7 @@ class NanoQC(object):
 
             # Plot values per sample
             ax.plot(x_values, y_values,
-                    label="%s (%sbp)" % (name, "{:,}".format(max(y_values))))
+                    label="%s (%s)" % (name, "{:,}".format(max(y_values))))
 
         # ax.legend(legend_names, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
         plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)  # New
@@ -547,6 +795,7 @@ class NanoQC(object):
                     label="fail (Avg: %s)" % mean_fail_qual)
         plt.legend()
         ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
         fig.savefig(self.output_folder + "/phred_score_distribution.png")
 
@@ -556,9 +805,6 @@ class NanoQC(object):
         :param d: Dictionary
         :return: png file
         """
-        #
-        # Frequency of sizes (bins of 1kb). Log scale
-        #
 
         size_pass = list()
         size_fail = list()
@@ -606,7 +852,43 @@ class NanoQC(object):
         :return: png file
         """
 
-        from math import ceil, floor
+        qs_pass = list()
+        for name in d:
+            for seqid in d[name]:
+                qual = d[name][seqid]['quality']
+                size = d[name][seqid]['length']
+                if d[name][seqid]['flag'] == "pass":
+                    qs_pass.append(tuple((size, qual)))
+
+        if not qs_pass:
+            return
+
+        df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+
+        min_len = pd.DataFrame.min(df_pass['Length (bp)'])
+        min_exp = np.log10(min_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        if min_value <= 0:
+            min_value = 1
+        max_len = pd.DataFrame.max(df_pass['Length (bp)'])
+        max_exp = np.log10(max_len)
+        max_value = float(10 ** (max_exp + 0.1))
+        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
+                          stat_func=None,
+                          xlim=[min_value, max_value],
+                          space=0,
+                          n_levels=50)
+        ax = g.ax_joint
+        ax.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
+
+        g.savefig(self.output_folder + "/quality_vs_length.png")
+
+    def plot_test(self, d):
+
+        from scipy import stats
 
         qs_pass = list()
         for name in d:
@@ -623,34 +905,51 @@ class NanoQC(object):
 
         min_len = pd.DataFrame.min(df_pass['Length (bp)'])
         min_exp = np.log10(min_len)
-        min_value = float(10**(floor(min_exp)))
-        if min_value == 0:
+        min_value = float(10 ** (min_exp - 0.1))
+        if min_value <= 0:
             min_value = 1
         max_len = pd.DataFrame.max(df_pass['Length (bp)'])
         max_exp = np.log10(max_len)
-        max_value = float(10**(ceil(max_exp)))
-        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
-                          stat_func=None,
+        max_value = float(10 ** (max_exp + 0.1))
+
+        min_phred = df_pass['Phred Score'].min()
+        max_phred = df_pass['Phred Score'].max()
+
+        binwidth = int(np.round(10 * np.log10(max_len - min_len)))
+        logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
+
+        # Initialize the figure
+        sns.set_style("ticks")
+        g = sns.JointGrid(x='Length (bp)', y='Phred Score', data=df_pass,
                           xlim=[min_value, max_value],
+                          ylim=[min_phred, max_phred],
                           space=0)
         ax = g.ax_joint
         ax.set_xscale('log')
         g.ax_marg_x.set_xscale('log')
-        g.fig.set_figwidth(8)
-        g.fig.set_figheight(4)
 
-        g.savefig(self.output_folder + "/quality_vs_length.png")
+        g.plot_joint(sns.kdeplot, shade=True, n_levels=100)
+        # g.plot_marginals(sns.kdeplot, shade=True)
+        g.plot_marginals(sns.distplot, kde=True)
+
+        # g.fig.set_figwidth(8)
+        # g.fig.set_figheight(4)
+
+        # Save
+        g.savefig(self.output_folder + "/test.png")
 
 
 if __name__ == '__main__':
 
     from argparse import ArgumentParser
 
-    parser = ArgumentParser(description='Check status of submissions on Phaster\'s server'
-                                        'and download results when available')
-    parser.add_argument('-i', '--input', metavar='myfile.fastq.gz',
-                        required=True,
+    parser = ArgumentParser(description='Plot QC data from nanopore sequencing run')
+    parser.add_argument('-f', '--fastq', metavar='/basecalled/folder/',
+                        required=False,
                         help='Input folder with fastq file(s),gzipped or not')
+    parser.add_argument('-s', '--summary', metavar='sequencing_summary.txt',
+                        required=False,
+                        help='The "sequencing_summary.txt" file produced by the Albacore basecaller')
     parser.add_argument('-o', '--output', metavar='/qc/',
                         required=True,
                         help='Output folder')
