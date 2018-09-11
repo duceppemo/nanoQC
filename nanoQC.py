@@ -14,7 +14,7 @@ import collections
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2'
+__version__ = '0.2.1'
 
 
 # TODO -> parse the fastq file if parallel, if gives a performance gain
@@ -79,9 +79,9 @@ class NanoQC(object):
             if not self.summary_dict:
                 raise Exception('No data!')
 
-        import pprint
-        pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(self.sample_dict)
+        # import pprint
+        # pp = pprint.PrettyPrinter(indent=4)
+        # pp.pprint(self.sample_dict)
 
     def check_dependencies(self):
         pass
@@ -251,17 +251,26 @@ class NanoQC(object):
             return my_dict
 
     def update_nested_dict(self, original_dict, new_dict):
-        """Update the dictionary and its nested dictionary fields."""
-        # Using our own stack to avoid recursion.
-        stack = [(original_dict, new_dict)]
-        while stack:
-            original_dict, new_dict = stack.pop()
-            for key, value in new_dict.items():
-                if isinstance(value, collections.Mapping):
-                    original_dict.setdefault(key, {})
-                    stack.append((original_dict[key], value))
+        """
+        Update the dictionary and its nested dictionary fields.
+        my_dict[name][seq_id]['length'] = length
+        """
+
+        for name, dict1 in new_dict.items():
+            for seq_id, dict2 in dict1.items():
+                if name not in original_dict.keys():
+                    original_dict[name] = dict1  # Add sample and read
                 else:
-                    original_dict[key] = value
+                # elif seq_id not in original_dict.values():  # it's not going to be. Every read has a unique seq_id
+                    original_dict[name][seq_id] = dict2
+
+        # for k, v in new_dict.items():
+        #     if (k in original_dict.keys()
+        #             and isinstance(original_dict[k], dict)
+        #             and isinstance(new_dict[k], collections.Mapping)):
+        #         self.update_nested_dict(original_dict[k], new_dict[k])
+        #     else:
+        #         original_dict[k] = new_dict[k]
 
         return original_dict
 
@@ -316,9 +325,6 @@ class NanoQC(object):
                 pass
             else:
                 raise Exception('Wrong file extension. Please use ".fastq" or ".fastq.gz"')
-            # Add to dictionary
-            # if name not in d:  # empty dictionary
-            #     d[name] = {}
 
             # start_time = time()
             pool = mp.Pool(self.cpu)
@@ -333,16 +339,23 @@ class NanoQC(object):
                 output.append(job.get())
 
             pool.close()
+            pool.join()
 
             # Merge dictionary
+            # Update self.sample_dict with results from every chunk
+            tmp_dict = dict()
             reads = 0
+            # print("Merging processes outputs")
             for dictionary in output:
                 # Count number of reads in the sample
                 for key, value in dictionary.items():
                     reads += len(value)
                 # d = {**d, **dictionary}  # Do the merge
-                d.update(dictionary)  # Do the merge
-                self.update_nested_dict(d, dictionary)
+                # d.update(dictionary)  # Do the merge
+                self.update_nested_dict(tmp_dict, dictionary)  # merge the output from the sample
+
+            # print("Merging to main dictionary")
+            self.update_nested_dict(d, tmp_dict)  # Merge sample to main dictionary
 
             end_time = time()
             interval = end_time - start_time
@@ -400,47 +413,48 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_reads_per_sample_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_bp_per_sample_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting total_bp_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_total_bp_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting quality_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_quality_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting phred_score_distribution...', end="", flush=True)
         start_time = time()
         self.plot_phred_score_distribution(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        print('\tPlotting quality_vs_length...', end="", flush=True)
         start_time = time()
         self.plot_quality_vs_length(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
+
         # self.plot_test(d)
 
     def plot_total_reads_vs_time(self, d):
