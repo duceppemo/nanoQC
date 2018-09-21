@@ -8,13 +8,21 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import multiprocessing as mp
+import threading
+from queue import Queue
+from multiprocessing.pool import ThreadPool
 from dateutil.parser import parse
 import logging
-import collections
+from collections import defaultdict, OrderedDict
+from itertools import zip_longest
+from itertools import islice
+from functools import partial
+from contextlib import closing
+from math import ceil
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.1'
+__version__ = '0.2.2'
 
 
 # TODO -> parse the fastq file if parallel, if gives a performance gain
@@ -25,6 +33,17 @@ __version__ = '0.2.1'
 # TODO -> unit testing
 # TODO -> benchmark using gzip library to decompress versus pigz system call
 # TODO -> add option to use the "sequencing_summary.txt" file as input instead of the fastq files
+
+
+class MyObjects(object):
+    def __init__(self, name, length, flag, average_phred, gc, time_string):
+        # Create seq object with its attributes
+        self.name = name
+        self.length = length
+        self.flag = flag
+        self.average_phred = average_phred
+        self.gc = gc
+        self.time_string = time_string
 
 
 class NanoQC(object):
@@ -38,16 +57,22 @@ class NanoQC(object):
         self.output_folder = args.output
 
         # Shared data structure(s)
-        self.sample_dict = dict()
-        self.summary_dict = dict()
+        # self.sample_dict = dict()
+        # self.summary_dict = dict()
         # self.sample_dict = nested_dict()
         # self.summary_dict = nested_dict()
+        self.sample_dict = defaultdict()
+        self.summary_dict = defaultdict()
 
         # Create a list of fastq files in input folder
         self.input_fastq_list = list()
 
+        #Time tracking
+        self.total_time = list()
+
         # Threading
         self.cpu = mp.cpu_count()
+        # self.my_queue = Queue(maxsize=0)
 
         # run the script
         self.run()
@@ -57,6 +82,8 @@ class NanoQC(object):
         Run everything
         :return:
         """
+
+        self.total_time.append(time())
 
         self.check_dependencies()
 
@@ -71,17 +98,22 @@ class NanoQC(object):
             if not self.sample_dict:
                 raise Exception('No data!')
             else:
-                self.make_fastq_plots()  # make the plots for fastq files
+                self.make_fastq_plots(self.sample_dict)  # make the plots for fastq files
         else:  # elif self.input_summary:
             self.parse_summary(self.summary_dict)
 
             # Check if there is data
             if not self.summary_dict:
                 raise Exception('No data!')
+            else:
+                self.make_summary_plots(self.summary_dict)
 
         # import pprint
         # pp = pprint.PrettyPrinter(indent=4)
         # pp.pprint(self.sample_dict)
+
+        self.total_time.append(time())
+        print("\n Total run time: {})".format(self.elapsed_time(self.total_time[1] - self.total_time[0])))
 
     def check_dependencies(self):
         pass
@@ -149,9 +181,9 @@ class NanoQC(object):
     def optimal_line_number(self, f, cpu):
         # Determine optimal number of lines in the fastq file to put in a chunk
         total_lines = 0
-        with open(f, 'rb') as file:
+        with open(f, 'rb', 1024 * 1024) as file_handle:  # 1MB buffer
             while True:
-                buffer = file.read(1024 * 1024 * 8)  # 8 MB buffer
+                buffer = file_handle.read(1024 * 1024)  # 1MB buffer
                 if not buffer:
                     break
                 total_lines += buffer.count(b'\n')
@@ -163,37 +195,49 @@ class NanoQC(object):
         return optimal
 
     # Iterator that yields start and end locations of a file chunk of default size 1MB.
-    def chunkify(self, f, size=1024 * 1024):
+    def chunkify(self, f):
         file_end = os.path.getsize(f)
-        with open(f, 'rb', 1024 * 1024) as file:
-            chunk_end = file.tell()
+
+        # Adjust size of chunks so its equal to number of CPUs
+        size = 1024 * 1024 * 4 # default was 1MB
+        # size = ceil(file_end / self.cpu)
+
+        with open(f, 'rb', size) as file_handle:
+            chunk_end = file_handle.tell()
             while True:
                 chunk_start = chunk_end
-                file.seek(size, 1)
-                self._EOC(file)
-                chunk_end = file.tell()
+                file_handle.seek(size, 1)
+                self.find_end_of_chunk(file_handle)
+                chunk_end = file_handle.tell()
                 yield chunk_start, chunk_end - chunk_start
                 if chunk_end >= file_end:
                     break
 
+    def make_chunks(self, file_handle, size):
+        while True:
+            chunk = list(islice(file_handle, size))
+            if not chunk:
+                break
+            yield chunk
+
     # read chunk
-    def read(self, f, chunk):
-        with open(f, 'rb') as file:
-            file.seek(chunk[0])
-            return file.read(chunk[1])
+    def read_chunk(self, f, chunk_info):
+        with open(f, 'rb', 1024 * 1024) as file_handle:
+            file_handle.seek(chunk_info[0])
+            return file_handle.read(chunk_info[1])
 
     # End of chunk
-    def _EOC(self, file):
-        l = file.readline()  # incomplete line
-        p = file.tell()
-        l = file.readline()
-        while l and b'runid' not in l:  # find the start of sequence
-            p = file.tell()
-            l = file.readline()
-        file.seek(p)  # revert one line
+    def find_end_of_chunk(self, file_handle):
+        line = file_handle.readline()  # incomplete line
+        position = file_handle.tell()
+        line = file_handle.readline()
+        while line and b'runid' not in line:  # find the start of sequence
+            position = file_handle.tell()
+            line = file_handle.readline()
+        file_handle.seek(position)  # revert one line
 
     def parse_fastq_to_dict(self, l, my_dict, name, flag):
-        header, seq, extra, qual = l  # get each component od list in a variable
+        header, seq, extra, qual = l  # get each component of list in a variable
 
         # Sequence ID
         seq_id = header.split()[0][1:]
@@ -208,34 +252,88 @@ class NanoQC(object):
         # Average phred score
         phred_list = list()
         for letter in qual:
+            # phred_list.append(ord(letter))
             phred_list.append(letter)
         average_phred = sum(phred_list) / len(phred_list) - 33
-        average_phred = round(average_phred, 1)
 
         # GC percentage
         g_count = float(seq.count(b'G'))
         c_count = float(seq.count(b'C'))
         gc = int(round((g_count + c_count) / float(length) * 100))
 
-        # Add to dictionary
-        if name not in my_dict:  # empty dictionary
-            my_dict[name] = {}
-        if seq_id not in my_dict[name]:
-            my_dict[name][seq_id] = {}
+        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
 
-        my_dict[name][seq_id]['length'] = length
-        my_dict[name][seq_id]['quality'] = average_phred
-        my_dict[name][seq_id]['flag'] = flag
-        my_dict[name][seq_id]['gc'] = gc
-        my_dict[name][seq_id]['datetime'] = time_string  # 2018-05-04T03:14:13Z
+        my_dict[seq_id] = seq
 
-    def get_chunk_data(self, f, name, flag, chunk):
+    def parse_fastq_to_dict_islice(self, l, d, name, flag):
+        l = map(str.strip, l)
+        header, seq, extra, qual = l  # get each component of list in a variable
+
+        # Sequence ID
+        seq_id = header.split()[0][1:]
+
+        # Read Time stamp
+        time_string = header.split()[4].split('=')[1]
+        time_string = parse(time_string)
+
+        # Sequence length
+        length = len(seq)
+
+        # Average phred score
+        phred_list = list()
+        for letter in qual:
+            phred_list.append(ord(letter))
+            # phred_list.append(letter)
+        average_phred = sum(phred_list) / len(phred_list) - 33
+
+        # GC percentage
+        g_count = float(seq.count('G'))
+        c_count = float(seq.count('C'))
+        gc = int(round((g_count + c_count) / float(length) * 100))
+
+        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
+        d[seq_id] = seq
+
+    def parse_fastq_to_dict_islice_pool(self, l, name, flag):
+        my_dict = {}
+        l = map(str.strip, l)
+        header, seq, extra, qual = l  # get each component of list in a variable
+
+        # Sequence ID
+        seq_id = header.split()[0][1:]
+
+        # Read Time stamp
+        time_string = header.split()[4].split('=')[1]
+        time_string = parse(time_string)
+
+        # Sequence length
+        length = len(seq)
+
+        # Average phred score
+        phred_list = list()
+        for letter in qual:
+            phred_list.append(ord(letter))
+            # phred_list.append(letter)
+        average_phred = sum(phred_list) / len(phred_list) - 33
+
+        # GC percentage
+        g_count = float(seq.count('G'))
+        c_count = float(seq.count('C'))
+        gc = int(round((g_count + c_count) / float(length) * 100))
+
+        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
+        my_dict[seq_id] = seq
+
+        return my_dict
+
+    def get_chunk_data(self, f, name, flag, chunk_info):
         my_dict = {}
 
         while True:
-            data = self.read(f, chunk)
+            data = self.read_chunk(f, chunk_info)
             lines = []
             my_data = data.split(b'\n')
+            data = None
 
             for line in my_data:
                 if not line:  # end of file?
@@ -248,31 +346,136 @@ class NanoQC(object):
                 lines.append(line)
             self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
 
+            my_data = None
+
             return my_dict
 
-    def update_nested_dict(self, original_dict, new_dict):
+    def get_chunk_data_process(self, f, name, flag, q):
+        my_dict = {}
+        chunk_info = q.get()
+
+        while True:
+            data = self.read_chunk(f, chunk_info)
+            lines = []
+            my_data = data.split(b'\n')
+            data = None
+
+            for line in my_data:
+                if not line:  # end of file?
+                    break
+                line = line.rstrip()
+
+                if lines and b'runid' in line:  # new entry
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
+
+            my_data = None
+
+            return my_dict
+
+    def get_chunk_data_queue(self, f, name, flag, q):
+        my_dict = {}
+
+        while True:
+            chunk_info = q.get()
+            if chunk_info is None:
+                break
+            # print(f, chunk_info)  # debug
+            data = self.read_chunk(f, chunk_info)
+            lines = []
+            my_data = data.split(b'\n')
+            data = None
+
+            for line in my_data:
+                if not line:  # end of file?
+                    break
+                line = line.rstrip()
+
+                if lines and b'runid' in line:  # new entry
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
+
+            my_data = None
+
+            self.sample_dict.update(my_dict)
+            q.task_done()
+
+    def get_chunk_data_map(self, f, name, flag, chunk_info):
+        my_dict = {}
+
+        while True:
+            data = self.read_chunk(f, chunk_info)
+            lines = []
+            my_data = data.split(b'\n')
+            data = None
+
+            for line in my_data:
+                if not line:  # end of file?
+                    break
+                line = line.rstrip()
+
+                if lines and b'runid' in line:  # new entry
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
+
+            my_data = None
+
+            return my_dict
+
+    def get_chunk_data_new(self, f, chunk_info, chunk_data):
+        data = self.read_chunk(f, chunk_info)
+        chunk_data.append(data.split(b'\n'))
+
+        return chunk_data
+
+    def process_chunk(self, name, flag, chunk):
         """
-        Update the dictionary and its nested dictionary fields.
-        my_dict[name][seq_id]['length'] = length
+        Put a fastq entry in a list and send it to self.parse_fastq_to_dict
+        :param f: file path
+        :param name: name of the file, typically 'barcodeXX'
+        :param flag: 'pass' or 'fail'
+        :param chunk: a tuple containing a multiple of 4 lines
+        :return: dictioanry with relevant information
         """
+        my_dict = {}
 
-        for name, dict1 in new_dict.items():
-            for seq_id, dict2 in dict1.items():
-                if name not in original_dict.keys():
-                    original_dict[name] = dict1  # Add sample and read
-                else:
-                # elif seq_id not in original_dict.values():  # it's not going to be. Every read has a unique seq_id
-                    original_dict[name][seq_id] = dict2
+        while True:
+            lines = []
+            for line in chunk:
+                if not line:  # end of file?
+                    continue
+                line = line.rstrip()
 
-        # for k, v in new_dict.items():
-        #     if (k in original_dict.keys()
-        #             and isinstance(original_dict[k], dict)
-        #             and isinstance(new_dict[k], collections.Mapping)):
-        #         self.update_nested_dict(original_dict[k], new_dict[k])
-        #     else:
-        #         original_dict[k] = new_dict[k]
+                # if lines and b'runid' in line:  # new entry -> specific to nanopore
+                if len(lines) == 4:
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
 
-        return original_dict
+            return my_dict
+
+    def process_chunk_new(self, chunk, name, flag):
+        lines = []
+        my_dict = {}
+        for line in chunk:
+            if not line:  # end of file?
+                break
+            line = line.rstrip()
+
+            if lines and b'runid' in line:  # new entry
+                self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                lines = []
+            lines.append(line)
+        self.parse_fastq_to_dict(lines, my_dict, name, flag)  # For the last entry
+
+        return my_dict
 
     def parse_fastq(self, l, d):
         """
@@ -292,8 +495,30 @@ class NanoQC(object):
             name = os.path.basename(f).split('.')[0].split('_')[0]  # basename before 1st "_" -> sample name
             # name = file.name.split('/')[-2]  # Parent folder name
 
+            filename = os.path.basename(f)
+            filename_no_gz = '.'.join(filename.split('.')[:-1])
+            gz_flag = 0
+
+            start_time = time()
+            if f.endswith('.fastq.gz'):
+                print("Decompressing {} to '/tmp'".format(os.path.basename(f)))
+                p1 = subprocess.Popen(['pigz', '-d', '-k', '-f', '-c', f], stdout=subprocess.PIPE)
+                (outs, errs) = p1.communicate()
+                with open('/tmp/' + filename_no_gz, 'b+w', 1024 * 1024) as tmp_file:
+                    tmp_file.write(outs)
+                f = "/tmp/" + filename_no_gz
+                gz_flag = 1
+            if f.endswith(".fastq"):
+                pass
+            else:
+                raise Exception('Wrong file extension. Please use ".fastq" or ".fastq.gz"')
+
             # get some stats about the input file
-            stat_info = os.stat(f)
+            if gz_flag == 1:
+                stat_info = os.stat('/tmp/' + filename_no_gz)
+            else:
+                stat_info = os.stat(f)
+
             file_size = self.hbytes(stat_info.st_size)
 
             flag = 'pass'  # Default value
@@ -308,54 +533,259 @@ class NanoQC(object):
                 print("Parsing sample \"%s\" from \"%s\" folder (%s). Assuming \"pass\" reads..."
                       % (name, flag, file_size), end="", flush=True)
 
-            filename = os.path.basename(f)
-            filename_no_gz = '.'.join(filename.split('.')[:-1])
-            gz_flag = 0
+            ####################################
+            # Multiprocessing -> pool.apply_async
 
-            start_time = time()
+            # pool = mp.Pool(self.cpu)
+            # # # lines_per_chunk = self.optimal_line_number(f, self.cpu)
+            # lines_per_chunk = 4
+            # #
+            # jobs = []
+            # with open(f, 'rb', 1024 * 1024) as file_handle:
+            #     # for chunk in self.make_chunks(file_handle, 40):
+            #     #     job = pool.apply_async(self.process_chunk, args=(name, flag, chunk))
+            #     #     jobs.append(job)
+            #     for chunk in zip_longest(*[file_handle] * lines_per_chunk, fillvalue=None):
+            #         job = pool.apply_async(self.process_chunk, args=(name, flag, chunk))
+            #         jobs.append(job)
+            # #     for chunk_info in self.chunkify(f):
+            # #         job = pool.apply_async(self.get_chunk_data, args=(f, name, flag, chunk_info))
+            # #         jobs.append(job)
+            # # # with open(f, 'rb', 1024 * 1024) as file_handle:
+            # # #     for chunk in self.make_chunks(file_handle, lines_per_chunk):
+            # # #         job = pool.apply_async(self.process_chunk, args=(name, flag, chunk))
+            # # #         jobs.append(job)
+            # #
+            # output = []
+            # for job in jobs:
+            #     output.append(job.get())
+            #
+            # jobs.clear()
+            #
+            # pool.close()
+            # pool.join()
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in output:
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+            #
+            # output.clear()
+            #########################################
 
-            if f.endswith('.fastq.gz'):
-                p1 = subprocess.Popen(['pigz', '-d', '-k', '-f', '-c', f], stdout=subprocess.PIPE)
-                (outs, errs) = p1.communicate()
-                with open('/tmp/' + filename_no_gz, 'b+w') as tmp_file:
-                    tmp_file.write(outs)
-                f = "/tmp/" + filename_no_gz
-                gz_flag = 1
-            if f.endswith(".fastq"):
-                pass
-            else:
-                raise Exception('Wrong file extension. Please use ".fastq" or ".fastq.gz"')
+            ####################################
+            # Multiprocessing -> pool.map
 
-            # start_time = time()
             pool = mp.Pool(self.cpu)
+            # pool = mp.Pool(4)
 
-            jobs = []
-            for chunk in self.chunkify(f):
-                job = pool.apply_async(self.get_chunk_data, args=(f, name, flag, chunk,))
-                jobs.append(job)
-
-            output = []
-            for job in jobs:
-                output.append(job.get())
+            chunk_info_list = []
+            for chunk_info in self.chunkify(f):
+                chunk_info_list.append(chunk_info)
+            func = partial(self.get_chunk_data, f, name, flag)
+            results = pool.map_async(func, chunk_info_list)
+            # results = pool.starmap_async(func, chunk_info_list)
 
             pool.close()
             pool.join()
+            # pool.terminate()  # Needed to do proper garbage collection?
 
-            # Merge dictionary
             # Update self.sample_dict with results from every chunk
-            tmp_dict = dict()
             reads = 0
-            # print("Merging processes outputs")
-            for dictionary in output:
+            for dictionary in results.get():
                 # Count number of reads in the sample
-                for key, value in dictionary.items():
-                    reads += len(value)
-                # d = {**d, **dictionary}  # Do the merge
-                # d.update(dictionary)  # Do the merge
-                self.update_nested_dict(tmp_dict, dictionary)  # merge the output from the sample
+                reads += len(dictionary)
+                d.update(dictionary)  # Do the merge
+            #########################################
 
-            # print("Merging to main dictionary")
-            self.update_nested_dict(d, tmp_dict)  # Merge sample to main dictionary
+            #########################################
+            # Process
+            # q = mp.Queue()
+            # jobs = []
+            # for i in range(self.cpu):
+            #     p = mp.Process(target=self.get_chunk_data_process, args=(f, name, flag, q,))
+            #     jobs.append(p)
+            #     p.start()
+            #
+            # for chunk_info in self.chunkify(f):
+            #     q.put(chunk_info)
+            #
+            # for proc in jobs:
+            #     proc.join()
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in return_dict.values():
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+            #########################################
+
+            #########################################
+            # asyncio
+            import asyncio
+
+
+            #########################################
+
+            #########################################
+            # islice
+            # pool = mp.Pool(self.cpu)
+            # # lines_per_chunk = self.optimal_line_number(f, self.cpu)
+            # lines_per_chunk = 40
+            #
+            # jobs = []
+            # with open(f, 'rb') as file_handle:
+            #     for chunk in zip_longest(*[file_handle] * lines_per_chunk, fillvalue=None):
+            #         job = pool.apply_async(self.process_chunk, args=(name, flag, chunk))
+            #         jobs.append(job)
+            #
+            # output = []
+            # for job in jobs:
+            #     output.append(job.get())
+            #
+            # jobs.clear()
+            #
+            # pool.close()
+            # pool.join()
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in output:
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+            #
+            # output.clear()
+            #########################################
+
+            #########################################
+            # pool = mp.Pool(self.cpu)
+            # # lines_per_chunk = self.optimal_line_number(f, self.cpu)
+            # lines_per_chunk = 40
+            #
+            # chunk_list = []
+            # with open(f, 'rb') as file_handle:
+            #     for chunk in zip_longest(*[file_handle] * lines_per_chunk, fillvalue=None):
+            #         chunk_list.append(chunk)
+            #
+            # results = []
+            #
+            # func = partial(self.process_chunk, name, flag)
+            # results = pool.map_async(func, chunk_list, chunksize=1)
+            # # results = pool.map(func, chunk_list)
+            #
+            # pool.close()
+            # pool.join()
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in results.get():
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+            #########################################
+
+            #########################################
+            # put chunk in list
+            # pool = mp.Pool(self.cpu)
+            #
+            # chunk_data = []
+            # for c in self.chunkify(f):
+            #     self.get_chunk_data_new(f, c, chunk_data)
+            #
+            # jobs = []
+            # for chunk in chunk_data:
+            #     job = pool.apply_async(self.process_chunk_new, args=(chunk, name, flag,))
+            #     jobs.append(job)
+            #
+            # output = []
+            # for job in jobs:
+            #     output.append(job.get())
+            #
+            # pool.close()
+            # pool.join()
+            #
+            # # Merge dictionary
+            # reads = 0
+            # # print("Merging processes outputs")
+            # for dictionary in output:
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+
+            #########################################
+
+            #########################################
+            # Threading approach
+
+            # # Setup some threads
+            # threads = []
+            # for i in range(self.cpu):
+            #     t = threading.Thread(target=self.get_chunk_data_queue, args=(f, name, flag, self.my_queue))
+            #     t.setDaemon(True)
+            #     t.start()
+            #     threads.append(t)
+            #
+            # # Feed the threads
+            # for chunk_info in self.chunkify(f):
+            #     self.my_queue.put(chunk_info)
+            #
+            # # Wait for queue to be empty
+            # self.my_queue.join()
+            #
+            # #Stop the workers
+            # for i in range(self.cpu):
+            #     self.my_queue.put(None)
+            # for t in threads:
+            #     t.join()
+            #########################################
+
+            #########################################
+            # Line by line approach
+
+            # reads = 0
+            # with open(f, 'rb', 1024 * 1024) as file_handle:
+            #     lines = []
+            #     for line in file_handle:
+            #         if not line:  # end of file?
+            #             break
+            #         line = line.rstrip()
+            #         if len(lines) == 4:
+            #             reads += 1
+            #             self.parse_fastq_to_dict(lines, d, name, flag)
+            #             lines = []
+            #         lines.append(line)
+            #     reads += 1
+            #     self.parse_fastq_to_dict(lines, d, name, flag)
+            #########################################
+
+            #########################################
+            # linear with chunks
+            # results = []
+            # for chunk_info in self.chunkify(f):
+            #     res = self.get_chunk_data(f, name, flag, chunk_info)
+            #     results.append(res)
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in results:
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
+            #########################################
+
+            #########################################
+            # Serial, 4 lines at the time
+            # n_lines = 4
+            # with open(f, 'r') as file_handle:
+            #     for chunk in zip_longest(*[iter(file_handle)] * n_lines, fillvalue=None):
+            #         self.parse_fastq_to_dict_islice(chunk, d, name, flag)
+            #
+            # reads = len(d.keys())
+            #########################################
 
             end_time = time()
             interval = end_time - start_time
@@ -373,11 +803,11 @@ class NanoQC(object):
         """
 
         start_time = time()
-        with open(self.input_summary, 'rb', 8192*1024) as file:
+        with open(self.input_summary, 'rb', 1024 * 1024) as file_handle:
             fields = list()
             read_counter = 0
-            next(file)  # skip first line
-            for line in file:
+            next(file_handle)  # skip first line
+            for line in file_handle:
                 line = line.rstrip()
                 fields.append(line.split(b"\t"))
                 if not line:
@@ -402,9 +832,9 @@ class NanoQC(object):
         interval = end_time - start_time
         print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
 
-    def make_fastq_plots(self):
-        # print("\nMaking plots...", end="", flush=True)
-        d = self.sample_dict
+    def make_fastq_plots(self, d):
+
+        print("\nMaking plots:")
 
         print('\tPlotting total_reads_vs_time...', end="", flush=True)
         start_time = time()
@@ -448,6 +878,20 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
+        print('\tPlotting length_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_length_distribution(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
+
+        # print('\tPlotting quality_vs_length_kde...', end="", flush=True)
+        # start_time = time()
+        # self.plot_quality_vs_length_kde(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print("Took %s" % self.elapsed_time(interval))
+
         print('\tPlotting quality_vs_length...', end="", flush=True)
         start_time = time()
         self.plot_quality_vs_length(d)
@@ -455,7 +899,12 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
-        # self.plot_test(d)
+        print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_vs_bp_per_sample(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
 
     def plot_total_reads_vs_time(self, d):
         """
@@ -463,24 +912,23 @@ class NanoQC(object):
         :param d: A dictionary to store the relevant information about each sequence
         :return: A png file with the graph
         TODO -> use numpy to handle the plot data, on row per sample?
+        name, length, flag, average_phred, gc, time_string
         """
-
-        #
-        # Total yield, all samples combined
-        #
 
         fig, ax = plt.subplots()
         t_pass = list()  # time
         t_fail = list()
-        for name in d:
-            for seqid in d[name]:
-                t = d[name][seqid]['datetime']
-                if d[name][seqid]['flag'] == "pass":
-                    t_pass.append(t)
-                else:
-                    t_fail.append(t)
+
+        for seq_id, seq in d.items():
+            t = seq.time_string
+            if seq.flag == 'pass':
+                t_pass.append(t)
+            else:
+                t_fail.append(t)
 
         # Find the smallest datetime value
+        t_zero_pass = None
+        t_zero_fail = None
         if t_pass:
             t_zero_pass = min(t_pass)
 
@@ -498,6 +946,8 @@ class NanoQC(object):
 
         # Prepare datetime value for plotting
         # Convert time object in hours from beginning of run
+        y_pass = None
+        y_fail = None
         if t_pass:
             t_pass[:] = [x - t_zero for x in t_pass]  # Subtract t_zero for the all time points
             t_pass.sort()  # Sort
@@ -534,21 +984,31 @@ class NanoQC(object):
         Plot yield per sample. Just the pass reads
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         # fig, ax = plt.subplots()
         # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         fig, ax = plt.subplots(figsize=(10, 6))  # In inches
+
+        # Fetch required information
+        my_sample_dict = defaultdict()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                my_sample_dict[seq.name][seq_id] = seq.time_string
+
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # Make the plot
         legend_names = list()
-        for name in d:
+        for name, seq_ids in od.items():
             legend_names.append(name)
             ts_pass = list()
-            for seqid in d[name]:
-                ts = d[name][seqid]['datetime']
-                if d[name][seqid]['flag'] == "pass":
-                    ts_pass.append(ts)
-            if not ts_pass:
-                return
+            for seq, time_tag in seq_ids.items():
+                ts_pass.append(time_tag)
 
             ts_zero = min(ts_pass)
             ts_pass[:] = [x - ts_zero for x in ts_pass]  # Subtract t_zero for the all time points
@@ -561,9 +1021,9 @@ class NanoQC(object):
                     label="%s (%s)" % (name, "{:,}".format(max(ys_pass))))
             # ax.legend(legend_names)
 
-        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)  # New
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 
-        ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Read yield per sample')
+        ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Pass reads per sample')
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
         # comma-separated numbers to the y axis
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
@@ -575,19 +1035,28 @@ class NanoQC(object):
         Read length per sample vs time
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         fig, ax = plt.subplots(figsize=(10, 6))  # In inches
-        for name in d:
-            ts_pass = list()
-            for seqid in d[name]:
-                ts = d[name][seqid]['datetime']
-                length = d[name][seqid]['length']
-                if d[name][seqid]['flag'] == "pass":
-                    ts_pass.append(tuple((ts, length)))
 
-            if not ts_pass:
-                return
+        # Fetch required information
+        my_sample_dict = defaultdict()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                my_sample_dict[seq.name][seq_id] = (seq.time_string, seq.length)  #tuple
+
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # Make the plot
+        for name, seq_ids in od.items():
+            ts_pass = list()
+            for seq, data_tuple in seq_ids.items():
+                ts_pass.append(data_tuple)
+
             # Prepare x values (time)
             ts_zero = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
             ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
@@ -623,19 +1092,19 @@ class NanoQC(object):
         Sequence length vs time
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         fig, ax = plt.subplots()
+
+        # Fetch required information
         ts_pass = list()
         ts_fail = list()
-        for name in d:
-            for seqid in d[name]:
-                ts = d[name][seqid]['datetime']
-                l = d[name][seqid]['length']
-                if d[name][seqid]['flag'] == "pass":
-                    ts_pass.append(tuple((ts, l)))
-                else:
-                    ts_fail.append(tuple((ts, l)))
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                ts_pass.append(tuple((seq.time_string, seq.length)))
+            else:
+                ts_fail.append(tuple((seq.time_string, seq.length)))
 
         ts_zero_pass = list()
         ts_zero_fail = list()
@@ -652,6 +1121,10 @@ class NanoQC(object):
         else:  # elif ts_fail:
             ts_zero = ts_zero_fail
 
+        x_pass_values = None
+        y_pass_values = None
+        x_fail_values = None
+        y_fail_values = None
         if ts_pass:
             ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
             ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
@@ -697,20 +1170,22 @@ class NanoQC(object):
         Quality vs time (bins of 1h). Violin plot
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         fig, ax = plt.subplots(figsize=(10, 4))
+
         ts_pass = list()
         ts_fail = list()
-        for name in d:
-            for seqid in d[name]:
-                ts = d[name][seqid]['datetime']
-                l = d[name][seqid]['quality']
-                if d[name][seqid]['flag'] == "pass":
-                    ts_pass.append(tuple((ts, l)))
-                else:
-                    ts_fail.append(tuple((ts, l)))
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                #         average_phred = round(average_phred_full, 1)
+                ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+            else:
+                ts_fail.append(tuple((seq.time_string, round(seq.average_phred, 1))))
 
+        ts_zero_pass = None
+        ts_zero_fail = None
         if ts_pass:
             ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
 
@@ -772,19 +1247,21 @@ class NanoQC(object):
         Frequency of phred scores
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         fig, ax = plt.subplots()
+
         qual_pass = list()
         qual_fail = list()
-        for name in d:
-            for seqid in d[name]:
-                qual = d[name][seqid]['quality']
-                if d[name][seqid]['flag'] == "pass":
-                    qual_pass.append(qual)
-                else:
-                    qual_fail.append(qual)
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                qual_pass.append(round(seq.average_phred, 1))
+            else:
+                qual_fail.append(round(seq.average_phred, 1))
 
+        mean_pass_qual = None
+        mean_fail_qual = None
         if qual_pass:
             mean_pass_qual = np.round(np.mean(qual_pass), 1)
 
@@ -818,17 +1295,17 @@ class NanoQC(object):
         Frequency of sizes. Bins auto-sized based on length distribution. Log scale x-axis.
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         size_pass = list()
         size_fail = list()
-        for name in d:
-            for seqid in d[name]:
-                size = d[name][seqid]['length']
-                if d[name][seqid]['flag'] == "pass":
-                    size_pass.append(size)
-                else:
-                    size_fail.append(size)
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                size_pass.append(seq.length)
+            else:
+                size_fail.append(seq.length)
+
         if size_fail:  # assume "pass" always present
             min_len = min(min(size_pass), min(size_fail))
             max_len = max(max(size_pass), max(size_fail))
@@ -859,39 +1336,60 @@ class NanoQC(object):
         plt.tight_layout()
         fig.savefig(self.output_folder + "/length_distribution.png")
 
-    def plot_quality_vs_length(self, d):
+    def plot_quality_vs_length_kde(self, d):
         """
         seaborn jointplot (length vs quality)
         :param d: Dictionary
         :return: png file
+        name, length, flag, average_phred, gc, time_string
         """
 
         qs_pass = list()
-        for name in d:
-            for seqid in d[name]:
-                qual = d[name][seqid]['quality']
-                size = d[name][seqid]['length']
-                if d[name][seqid]['flag'] == "pass":
-                    qs_pass.append(tuple((size, qual)))
-
-        if not qs_pass:
-            return
+        qs_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                qs_pass.append(tuple((seq.length, seq.average_phred)))
+            else:
+                qs_fail.append(tuple((seq.length, seq.average_phred)))
 
         df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+        df_pass['flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
-        min_len = pd.DataFrame.min(df_pass['Length (bp)'])
+        df_fail = pd.DataFrame(list(qs_fail), columns=['Length (bp)', 'Phred Score'])
+        df_fail['flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        df_concatenated = pd.concat([df_pass, df_fail])
+
+        # Find min and max length values
+        min_len = pd.DataFrame.min(df_concatenated['Length (bp)'])
         min_exp = np.log10(min_len)
         min_value = float(10 ** (min_exp - 0.1))
         if min_value <= 0:
             min_value = 1
-        max_len = pd.DataFrame.max(df_pass['Length (bp)'])
+        max_len = pd.DataFrame.max(df_concatenated['Length (bp)'])
         max_exp = np.log10(max_len)
         max_value = float(10 ** (max_exp + 0.1))
-        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
-                          stat_func=None,
+
+        # min_len = pd.DataFrame.min(df_pass['Length (bp)'])
+        # min_exp = np.log10(min_len)
+        # min_value = float(10 ** (min_exp - 0.1))
+        # if min_value <= 0:
+        #     min_value = 1
+        # max_len = pd.DataFrame.max(df_pass['Length (bp)'])
+        # max_exp = np.log10(max_len)
+        # max_value = float(10 ** (max_exp + 0.1))
+        # g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
+        #                   stat_func=None,
+        #                   xlim=[min_value, max_value],
+        #                   space=0,
+        #                   n_levels=50)
+        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='reg',
+                          fit_reg=False,
                           xlim=[min_value, max_value],
                           space=0,
-                          n_levels=50)
+                          color='blue',
+                          joint_kws={'alpha':0.3, 's': 3})
+        g.plot_joint(sns.regplot, data=df_fail, fit_reg=False, color='red')
         ax = g.ax_joint
         ax.set_xscale('log')
         g.ax_marg_x.set_xscale('log')
@@ -900,57 +1398,311 @@ class NanoQC(object):
 
         g.savefig(self.output_folder + "/quality_vs_length.png")
 
-    def plot_test(self, d):
+    def jointplot_w_hue(self, data, x, y, hue=None, colormap=None,
+                        figsize=None, fig=None, scatter_kws=None):
+        """
+        https://gist.github.com/ruxi/ff0e9255d74a3c187667627214e1f5fa
+        :param data: pandas dataframe
+        :param x:
+        :param y:
+        :param hue:
+        :param colormap:
+        :param figsize:
+        :param fig:
+        :param scatter_kws:
+        :return:
+        """
 
-        from scipy import stats
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+        import matplotlib.gridspec as gridspec
+        import matplotlib.patches as mpatches
 
+        sns.set_style('darkgrid')
+
+        # defaults
+        if colormap is None:
+            colormap = sns.color_palette()  # ['blue','orange']
+        if figsize is None:
+            figsize = (5, 5)
+        if fig is None:
+            fig = plt.figure(figsize=figsize)
+        if scatter_kws is None:
+            scatter_kws = dict(alpha=0.4, lw=1)
+
+        # derived variables
+        if hue is None:
+            return "use normal sns.jointplot"
+        hue_groups = data[hue].unique()
+
+        subdata = dict()
+        colors = dict()
+
+        active_colormap = colormap[0: len(hue_groups)]
+        # active_colormap = ['blue', 'red']
+        legend_mapping = []
+        for hue_grp, color in zip(hue_groups, active_colormap):
+            legend_entry = mpatches.Patch(color=color, label=hue_grp)
+            legend_mapping.append(legend_entry)
+
+            subdata[hue_grp] = data[data[hue] == hue_grp]
+            colors[hue_grp] = color
+
+        # canvas setup
+        grid = gridspec.GridSpec(2, 2,
+                                 width_ratios=[4, 1],
+                                 height_ratios=[1, 4],
+                                 hspace=0, wspace=0)
+
+        ax_main = plt.subplot(grid[1, 0])
+        ax_xhist = plt.subplot(grid[0, 0], sharex=ax_main)
+        ax_yhist = plt.subplot(grid[1, 1])  # , sharey=ax_main)
+
+        # Set main plot x axis scale to log
+        ax_main.set_xscale('log')
+        min_len = min(data.ix[:, 0])
+        max_len = max(data.ix[:, 0])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        max_value = float(10 ** (max_exp + 0.1))
+        ax_main.set_xlim((min_value, max_value))
+
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 50)
+        min_phred = min(data.ix[:, 1])
+        max_phred = max(data.ix[:, 1])
+        # phred_range = max_phred - min_phred
+        phred_bins = np.linspace(min_phred, max_phred, 50)
+
+        ### Plotting
+
+        # histplot x-axis
+        for hue_grp in hue_groups:
+            sns.distplot(subdata[hue_grp][x], color=colors[hue_grp],
+                         ax=ax_xhist, bins=len_logbins)
+
+        # histplot y-axis
+        for hue_grp in hue_groups:
+            sns.distplot(subdata[hue_grp][y], color=colors[hue_grp],
+                         ax=ax_yhist, vertical=True, bins=phred_bins)
+
+        # main scatterplot
+        # note: must be after the histplots else ax_yhist messes up
+        for hue_grp in hue_groups:
+            sns.regplot(data=subdata[hue_grp], fit_reg=False,
+                        x=x, y=y, ax=ax_main, color=colors[hue_grp],
+                        scatter_kws=scatter_kws)
+
+        # despine
+        for myax in [ax_yhist, ax_xhist]:
+            sns.despine(ax=myax, bottom=False, top=True, left=False, right=True, trim=False)
+            plt.setp(myax.get_xticklabels(), visible=False)
+            plt.setp(myax.get_yticklabels(), visible=False)
+
+        # topright
+        ax_legend = plt.subplot(grid[0, 1])  # , sharey=ax_main)
+        plt.setp(ax_legend.get_xticklabels(), visible=False)
+        plt.setp(ax_legend.get_yticklabels(), visible=False)
+
+        # Hide label and grid for histogram plots
+        ax_xhist.set_xlabel('')
+        ax_yhist.set_ylabel('')
+        ax_legend.grid(False)  # hide grid
+        ax_xhist.grid(False)
+        ax_yhist.grid(False)
+
+
+        ax_legend.legend(handles=legend_mapping)
+        plt.close()
+
+        return dict(fig=fig, gridspec=grid)
+
+    def plot_quality_vs_length(self, d):
         qs_pass = list()
-        for name in d:
-            for seqid in d[name]:
-                qual = d[name][seqid]['quality']
-                size = d[name][seqid]['length']
-                if d[name][seqid]['flag'] == "pass":
-                    qs_pass.append(tuple((size, qual)))
-
-        if not qs_pass:
-            return
+        qs_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                qs_pass.append(tuple((seq.length, seq.average_phred)))
+            else:
+                qs_fail.append(tuple((seq.length, seq.average_phred)))
 
         df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+        df_pass['flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
-        min_len = pd.DataFrame.min(df_pass['Length (bp)'])
+        df_fail = pd.DataFrame(list(qs_fail), columns=['Length (bp)', 'Phred Score'])
+        df_fail['flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        df_concatenated = pd.concat([df_pass, df_fail])
+
+        fig = plt.figure(figsize=(10, 6))
+
+        if qs_fail:
+            self.jointplot_w_hue(data=df_concatenated, x='Length (bp)', y='Phred Score',
+                                 hue='flag', figsize=(10, 6), fig=fig, colormap=['blue', 'red'],
+                                 scatter_kws={'s': 1, 'alpha': 0.1})
+        else:
+            self.jointplot_w_hue(data=df_pass, x='Length (bp)', y='Phred Score',
+                                 hue='flag', figsize=(10, 6), fig=fig, colormap=['blue'],
+                                 scatter_kws={'s': 1, 'alpha': 0.1})
+
+        fig.savefig(self.output_folder + "/quality_vs_length.png")
+
+    def plot_test_old(self, d):
+        """
+        seaborn jointplot (length vs quality). More manual.
+        :param d:
+        :return:
+        """
+
+        from matplotlib import gridspec
+        from scipy.stats import gaussian_kde
+
+        qs_pass = list()
+        qs_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                qs_pass.append(tuple((seq.length, seq.average_phred)))
+            else:
+                qs_fail.append(tuple((seq.length, seq.average_phred)))
+
+        df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+        df_pass['flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+
+        df_fail = pd.DataFrame(list(qs_fail), columns=['Length (bp)', 'Phred Score'])
+        df_fail['flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        df_concatenated = pd.concat([df_pass, df_fail])
+
+        min_len = pd.DataFrame.min(df_concatenated['Length (bp)'])
         min_exp = np.log10(min_len)
         min_value = float(10 ** (min_exp - 0.1))
         if min_value <= 0:
             min_value = 1
-        max_len = pd.DataFrame.max(df_pass['Length (bp)'])
+        max_len = pd.DataFrame.max(df_concatenated['Length (bp)'])
         max_exp = np.log10(max_len)
         max_value = float(10 ** (max_exp + 0.1))
 
-        min_phred = df_pass['Phred Score'].min()
-        max_phred = df_pass['Phred Score'].max()
+        min_phred = df_concatenated['Phred Score'].min()
+        max_phred = df_concatenated['Phred Score'].max()
 
         binwidth = int(np.round(10 * np.log10(max_len - min_len)))
         logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
 
         # Initialize the figure
-        sns.set_style("ticks")
-        g = sns.JointGrid(x='Length (bp)', y='Phred Score', data=df_pass,
-                          xlim=[min_value, max_value],
-                          ylim=[min_phred, max_phred],
-                          space=0)
-        ax = g.ax_joint
-        ax.set_xscale('log')
-        g.ax_marg_x.set_xscale('log')
+        grid = gridspec.GridSpec(2, 2, width_ratios=[3, 1], height_ratios=[1, 4],
+                               hspace=0, wspace=0)
 
-        g.plot_joint(sns.kdeplot, shade=True, n_levels=100)
-        # g.plot_marginals(sns.kdeplot, shade=True)
-        g.plot_marginals(sns.distplot, kde=True)
+        ax_main = plt.subplot(grid[1, 0])
+        ax_xhist = plt.subplot(grid[0, 0], sharex=ax_main)
+        ax_yhist = plt.subplot(grid[1, 1])  # , sharey=ax_main)
+
+
+
+
+
+
+
+        gs = gridspec.GridSpec(2, 2, width_ratios=[3, 1], height_ratios=[1, 4],
+                               hspace=0, wspace=0)
+
+        # Create scatter plot
+        fig = plt.figure(figsize=(10, 6))  # In inches
+        ax = plt.subplot(gs[1, 0])
+        pass_ax = ax.scatter(df_pass['Length (bp)'], df_pass['Phred Score'],
+                         color='blue', alpha=0.1, s=1, label='pass')
+
+        fail_ax = ax.scatter(df_fail['Length (bp)'], df_fail['Phred Score'],
+                         color='red', alpha=0.1, s=1, label='fail')
+        pass_ax.xlim((0, max_value))
+        pass_ax.ylim((min_phred, max_phred))
+        fail_ax.xlim((0, max_value))
+        fail_ax.ylim((min_phred, max_phred))
+
+        # Create Y-marginal (right) -> Phred score
+        axr = plt.subplot(gs[1, 1], sharey=fail_ax, frameon=False,
+                          xticks=[])  # xlim=(0, 1), ylim = (ymin, ymax) xticks=[], yticks=[]
+        axr.hist(df_pass['Phred Score'], color='#5673E0', orientation='horizontal', density=True)
+
+        # Create X-marginal (top) -> length
+        axt = plt.subplot(gs[0, 0], sharex=pass_ax, frameon=False,
+                          yticks=[])  # xticks = [], , ) #xlim = (xmin, xmax), ylim=(0, 1)
+        axt.set_xscale('log')
+        axt.set_yscale('log')
+        axt.hist(df_pass['Length (bp)'], color='#5673E0', density=True)
+
+        legend_ax = plt.subplot(gs[0, 1], frameon=False)  # top right
+        legend_ax.legend = ((pass_ax, fail_ax), ('pass', 'fail'))
+
+        # Bring the marginals closer to the scatter plot
+        fig.tight_layout()
+
+        # sns.set_style("ticks")
+        # g = sns.JointGrid(x='Length (bp)', y='Phred Score', data=df_concatenated,
+        #                   xlim=[min_value, max_value], ylim=[min_phred, max_phred],
+        #                   space=0)
+        #
+        # ax = g.ax_joint
+        # ax.cla()  # clear the 2-D plot
+        # ax.set_xscale('log')
+        # g.ax_marg_x.set_xscale('log')
+        #
+        # # g.plot_joint(sns.kdeplot, shade=True, n_levels=100)
+        # # g.plot_joint(sns.regplot, scatter_kws={"color":"darkred","alpha":0.1,"s":1}, fit_reg=False)
+        # # g.plot_joint(sns.lmplot, x='Length (bp)', y='Phred Score', data=df_concatenated,  hue='flag')
+        # # g.plot_joint(sns.lmplot, x='Length (bp)', y='Phred Score', data=df_concatenated, hue='flag', fit_reg=False)
+        # g.plot_joint(plt.scatter,)
+        # g.plot_marginals(sns.distplot, kde=False)
 
         # g.fig.set_figwidth(8)
         # g.fig.set_figheight(4)
 
         # Save
-        g.savefig(self.output_folder + "/test.png")
+        # g.savefig(self.output_folder + "/test.png")
+        fig.savefig(self.output_folder + "/test.png")
+
+    def plot_reads_vs_bp_per_sample(self, d):
+        # Fetch required information
+        my_sample_dict = defaultdict()  # to get the lengths (bp)
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                if not my_sample_dict[seq.name]:
+                    my_sample_dict[seq.name] = [seq.length]
+                else:
+                    my_sample_dict[seq.name].append(seq.length)
+
+        # Create pandas dataframe
+        df = pd.DataFrame(columns=['Sample', 'bp', 'reads'])
+        for name, size_list in my_sample_dict.items():
+            df = df.append({'Sample': name, 'bp': sum(size_list), 'reads': len(size_list)}, ignore_index=True)
+
+        fig, ax = plt.subplots()
+        ax = df.plot(kind='bar', secondary_y='reads', title='bp versus reads', x='Sample', rot=0)
+
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.grid(False)
+        ax.legend(bbox_to_anchor=(1.3, 1), loc=2)
+        plt.legend(bbox_to_anchor=(1.3, 0.92), loc=2)
+
+        plt.tight_layout()
+
+        fig = ax.get_figure()
+        fig.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
+
+        # df = pd.DataFrame(columns=['Sample', 'Value', 'Info'])
+        # for name, size_list in my_sample_dict.items():
+        #     df = df.append({'Sample': name, 'Value': sum(size_list), 'Info': 'Total bp'}, ignore_index=True)
+        #     df = df.append({'Sample': name, 'Value': len(size_list), 'Info': 'Reads'}, ignore_index=True)
+
+        # g = sns.catplot(x='Sample', y='Value', hue='Info', data=df, kind='bar')
+        #
+        # plt.tight_layout()
+        # g.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
+
+    def make_summary_plots(self, d):
+        pass
 
 
 if __name__ == '__main__':
