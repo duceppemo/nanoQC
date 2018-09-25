@@ -19,10 +19,12 @@ from itertools import islice
 from functools import partial
 from contextlib import closing
 from math import ceil
+import subprocess
+import gzip
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.2'
+__version__ = '0.2.3'
 
 
 # TODO -> parse the fastq file if parallel, if gives a performance gain
@@ -92,7 +94,8 @@ class NanoQC(object):
 
         # Select appropriate parser based on input type
         if self.input_folder:
-            self.parse_fastq(self.input_fastq_list, self.sample_dict)
+            # self.parse_fastq(self.input_fastq_list, self.sample_dict)
+            self.parse_fastq_parallel(self.input_fastq_list, self.sample_dict)
 
             # Check if there is data
             if not self.sample_dict:
@@ -113,7 +116,7 @@ class NanoQC(object):
         # pp.pprint(self.sample_dict)
 
         self.total_time.append(time())
-        print("\n Total run time: {})".format(self.elapsed_time(self.total_time[1] - self.total_time[0])))
+        print("\n Total run time: {}".format(self.elapsed_time(self.total_time[1] - self.total_time[0])))
 
     def check_dependencies(self):
         pass
@@ -489,8 +492,6 @@ class NanoQC(object):
         http://www.blopig.com/blog/2016/08/processing-large-files-using-python/
         """
 
-        import subprocess
-
         for f in l:
             name = os.path.basename(f).split('.')[0].split('_')[0]  # basename before 1st "_" -> sample name
             # name = file.name.split('/')[-2]  # Parent folder name
@@ -578,26 +579,26 @@ class NanoQC(object):
             ####################################
             # Multiprocessing -> pool.map
 
-            pool = mp.Pool(self.cpu)
-            # pool = mp.Pool(4)
-
-            chunk_info_list = []
-            for chunk_info in self.chunkify(f):
-                chunk_info_list.append(chunk_info)
-            func = partial(self.get_chunk_data, f, name, flag)
-            results = pool.map_async(func, chunk_info_list)
-            # results = pool.starmap_async(func, chunk_info_list)
-
-            pool.close()
-            pool.join()
-            # pool.terminate()  # Needed to do proper garbage collection?
-
-            # Update self.sample_dict with results from every chunk
-            reads = 0
-            for dictionary in results.get():
-                # Count number of reads in the sample
-                reads += len(dictionary)
-                d.update(dictionary)  # Do the merge
+            # pool = mp.Pool(self.cpu)
+            # # pool = mp.Pool(4)
+            #
+            # chunk_info_list = []
+            # for chunk_info in self.chunkify(f):
+            #     chunk_info_list.append(chunk_info)
+            # func = partial(self.get_chunk_data, f, name, flag)
+            # results = pool.map_async(func, chunk_info_list)
+            # # results = pool.starmap_async(func, chunk_info_list)
+            #
+            # pool.close()
+            # pool.join()
+            # # pool.terminate()  # Needed to do proper garbage collection?
+            #
+            # # Update self.sample_dict with results from every chunk
+            # reads = 0
+            # for dictionary in results.get():
+            #     # Count number of reads in the sample
+            #     reads += len(dictionary)
+            #     d.update(dictionary)  # Do the merge
             #########################################
 
             #########################################
@@ -746,20 +747,20 @@ class NanoQC(object):
             #########################################
             # Line by line approach
 
-            # reads = 0
-            # with open(f, 'rb', 1024 * 1024) as file_handle:
-            #     lines = []
-            #     for line in file_handle:
-            #         if not line:  # end of file?
-            #             break
-            #         line = line.rstrip()
-            #         if len(lines) == 4:
-            #             reads += 1
-            #             self.parse_fastq_to_dict(lines, d, name, flag)
-            #             lines = []
-            #         lines.append(line)
-            #     reads += 1
-            #     self.parse_fastq_to_dict(lines, d, name, flag)
+            reads = 0
+            with open(f, 'rb', 1024 * 1024) as file_handle:
+                lines = []
+                for line in file_handle:
+                    if not line:  # end of file?
+                        break
+                    line = line.rstrip()
+                    if len(lines) == 4:
+                        reads += 1
+                        self.parse_fastq_to_dict(lines, d, name, flag)
+                        lines = []
+                    lines.append(line)
+                reads += 1
+                self.parse_fastq_to_dict(lines, d, name, flag)
             #########################################
 
             #########################################
@@ -794,6 +795,61 @@ class NanoQC(object):
             #  Remove tmp file
             if gz_flag == 1:
                 os.remove('/tmp/' + filename_no_gz)
+
+    def parse_file(self, f):
+        name = os.path.basename(f).split('.')[0].split('_')[0]  # basename before 1st "_" -> sample name
+
+        # get some stats about the input file
+        stat_info = os.stat(f)
+        file_size = self.hbytes(stat_info.st_size)
+
+        flag = 'pass'  # Default value
+        if 'fail' in f:
+            flag = 'fail'  # Check in path for the word "fail"
+
+        # Parse
+        my_dict = {}
+        with gzip.open(f, 'rb', 1024 * 1024) if f.endswith('gz') else open(f, 'rb', 1024 * 1024) as file_handle:
+            lines = []
+            for line in file_handle:
+                if not line:  # end of file?
+                    break
+                line = line.rstrip()
+                if len(lines) == 4:
+                    self.parse_fastq_to_dict(lines, my_dict, name, flag)
+                    lines = []
+                lines.append(line)
+            self.parse_fastq_to_dict(lines, my_dict, name, flag)
+
+        return my_dict
+
+    def parse_fastq_parallel(self, l, d):
+        print("Parsing fastq files...", end="", flush=True)
+        start_time = time()
+
+        # Parse the files in parallel
+        pool = mp.Pool(self.cpu)
+
+        jobs = []
+        for f in l:
+            job = pool.apply_async(self.parse_file, [f])
+            jobs.append(job)
+
+        results = []
+        for j in jobs:
+            results.append(j.get())
+
+        pool.close()
+        pool.join()
+        # pool.terminate()  # Needed to do proper garbage collection?
+
+        # Update self.sample_dict with results from every chunk
+        for dictionary in results:
+            d.update(dictionary)  # Do the merge
+
+        end_time = time()
+        interval = end_time - start_time
+        print(" took {}".format(self.elapsed_time(interval)))
 
     def parse_summary(self, d):
         """
@@ -1673,29 +1729,62 @@ class NanoQC(object):
                 else:
                     my_sample_dict[seq.name].append(seq.length)
 
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
         # Create pandas dataframe
         df = pd.DataFrame(columns=['Sample', 'bp', 'reads'])
-        for name, size_list in my_sample_dict.items():
+        for name, size_list in od.items():
             df = df.append({'Sample': name, 'bp': sum(size_list), 'reads': len(size_list)}, ignore_index=True)
 
-        fig, ax = plt.subplots()
-        ax = df.plot(kind='bar', secondary_y='reads', title='bp versus reads', x='Sample', rot=0)
+        fig, ax1 = plt.subplots(figsize=(10, 6))  # In inches
 
-        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
-        plt.grid(False)
-        ax.legend(bbox_to_anchor=(1.3, 1), loc=2)
-        plt.legend(bbox_to_anchor=(1.3, 0.92), loc=2)
+        ind = np.arange(len(df['Sample']))
+        width = 0.35
+        p1 = ax1.bar(ind, df['bp'], width, color='#4B9BFF', bottom=0, edgecolor='black')
+
+        ax2 = ax1.twinx()
+        p2 = ax2.bar(ind+width, df['reads'], width, color='#FFB46E', bottom=0, edgecolor='black')
+
+        ax1.set_title('Total Size Versus Total Reads Per Sample')
+        ax1.set_xticks(ind + width / 2)
+        ax1.set_xticklabels(tuple(df['Sample']), rotation=45, ha='right')
+
+        ax1.grid(False)
+        ax2.grid(False)
+
+        ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
+        ax1.legend((p1[0], p2[0]), ('bp', 'reads'), bbox_to_anchor=(1.1, 1), loc=2)
+        ax1.yaxis.set_units('Total bp')
+        ax2.yaxis.set_units('Total reads')
+        ax1.autoscale_view()
 
         plt.tight_layout()
-
-        fig = ax.get_figure()
         fig.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
 
+        #########################################
+        # ax = df.plot(kind='bar', secondary_y='reads', title='bp versus reads',
+        #              x='Sample', y=['bp', 'reads'], mark_right=False)
+        #
+        # ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        # ax.set_ylabel("Total bp")
+        # plt.grid(False)
+        # ax.legend(bbox_to_anchor=(1.3, 1), loc=2)
+        # plt.legend(bbox_to_anchor=(1.3, 0.92), loc=2)
+        #
+        # plt.tight_layout()
+        #
+        # fig = ax.get_figure()
+        # fig.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
+
+        ##########################################
         # df = pd.DataFrame(columns=['Sample', 'Value', 'Info'])
         # for name, size_list in my_sample_dict.items():
         #     df = df.append({'Sample': name, 'Value': sum(size_list), 'Info': 'Total bp'}, ignore_index=True)
         #     df = df.append({'Sample': name, 'Value': len(size_list), 'Info': 'Reads'}, ignore_index=True)
-
+        #
         # g = sns.catplot(x='Sample', y='Value', hue='Info', data=df, kind='bar')
         #
         # plt.tight_layout()
