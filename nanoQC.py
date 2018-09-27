@@ -24,16 +24,14 @@ import gzip
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.3'
+__version__ = '0.2.4'
 
 
-# TODO -> parse the fastq file if parallel, if gives a performance gain
-#         Either share dictionary across threads, or create one dictionary per thread and merge at the end???
+# TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
 # TODO -> Add a function to rename the samples with a conversion table (two-column tab-separated file)
 # TODO -> make proper log file
-# TODO -> check for dependencies (e.g. pigz)
+# TODO -> check for dependencies
 # TODO -> unit testing
-# TODO -> benchmark using gzip library to decompress versus pigz system call
 # TODO -> add option to use the "sequencing_summary.txt" file as input instead of the fastq files
 
 
@@ -962,6 +960,13 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
+        print('\tPlotting pores_output_vs_time...', end="", flush=True)
+        start_time = time()
+        self.pores_output_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
+
     def plot_total_reads_vs_time(self, d):
         """
         Plot number of reads against running time. Both Pass and fail reads in the same graph
@@ -1389,6 +1394,7 @@ class NanoQC(object):
         plt.legend()
         plt.xscale('log')
         ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
         fig.savefig(self.output_folder + "/length_distribution.png")
 
@@ -1495,7 +1501,6 @@ class NanoQC(object):
         colors = dict()
 
         active_colormap = colormap[0: len(hue_groups)]
-        # active_colormap = ['blue', 'red']
         legend_mapping = []
         for hue_grp, color in zip(hue_groups, active_colormap):
             legend_entry = mpatches.Patch(color=color, label=hue_grp)
@@ -1512,10 +1517,11 @@ class NanoQC(object):
 
         ax_main = plt.subplot(grid[1, 0])
         ax_xhist = plt.subplot(grid[0, 0], sharex=ax_main)
-        ax_yhist = plt.subplot(grid[1, 1])  # , sharey=ax_main)
+        ax_yhist = plt.subplot(grid[1, 1], sharey=ax_main)
 
         # Set main plot x axis scale to log
         ax_main.set_xscale('log')
+        # Set x-axis limits
         min_len = min(data.ix[:, 0])
         max_len = max(data.ix[:, 0])
         min_exp = np.log10(min_len)
@@ -1526,19 +1532,26 @@ class NanoQC(object):
 
         # Set bin sized for histogram
         len_logbins = np.logspace(min_exp, max_exp, 50)
+        # Set y-axis limits
         min_phred = min(data.ix[:, 1])
         max_phred = max(data.ix[:, 1])
         # phred_range = max_phred - min_phred
         phred_bins = np.linspace(min_phred, max_phred, 50)
 
-        ### Plotting
+        # Set the y limits for the marginal plots
+        # ax_xhist.set_ylim((min_value, max_value))
+        # ax_yhist.set_ylim(min_phred, max_phred)
 
-        # histplot x-axis
+        ##########
+        # Plotting
+        ##########
+
+        # histplot x-axis - Size distribution
         for hue_grp in hue_groups:
             sns.distplot(subdata[hue_grp][x], color=colors[hue_grp],
                          ax=ax_xhist, bins=len_logbins)
 
-        # histplot y-axis
+        # histplot y-axis - Phred score
         for hue_grp in hue_groups:
             sns.distplot(subdata[hue_grp][y], color=colors[hue_grp],
                          ax=ax_yhist, vertical=True, bins=phred_bins)
@@ -1558,6 +1571,7 @@ class NanoQC(object):
 
         # topright
         ax_legend = plt.subplot(grid[0, 1])  # , sharey=ax_main)
+        ax_legend.set_facecolor('white')
         plt.setp(ax_legend.get_xticklabels(), visible=False)
         plt.setp(ax_legend.get_yticklabels(), visible=False)
 
@@ -1567,7 +1581,6 @@ class NanoQC(object):
         ax_legend.grid(False)  # hide grid
         ax_xhist.grid(False)
         ax_yhist.grid(False)
-
 
         ax_legend.legend(handles=legend_mapping)
         plt.close()
@@ -1789,6 +1802,55 @@ class NanoQC(object):
         #
         # plt.tight_layout()
         # g.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
+
+    def pores_output_vs_time(self, d):
+        from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+        time_list = list()
+        for seq_id, seq in d.items():
+            time_list.append(seq.time_string)
+
+        time_list = sorted(time_list)  # order list
+        time_zero = min(time_list)  # find smallest datetime value
+        time_list1 = [x - time_zero for x in time_list]  # Subtract t_zero for the all time points
+        time_list2 = [x.days * 1440 + x.seconds / 60 for x in time_list1]  # Convert to minutes (float)
+        time_list3 = [int(np.round(x)) for x in time_list2]  # Round minutes
+        # Check how many 15-minute bins are required to plot all the data
+        nbins = max(time_list3) / 15 if max(time_list3) % 15 == 0 else int(max(time_list3) / 15) + 1
+        # Create the bin boundaries
+        x_bins = np.linspace(min(time_list3), max(time_list3), nbins)  # every 15 min
+
+        # Generate counts for each bin
+        hist, edges = np.histogram(time_list3, bins=x_bins, density=False)
+
+        fig, ax = plt.subplots()
+
+        # Plot the data
+        g = sns.scatterplot(data=hist, x_bins=edges, legend=False, size=3, alpha=0.5, linewidth=0)
+
+        # Adjust format of numbers for y axis: "1000000" -> "1,000,000"
+        g.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
+        # Change x axis labels chunk-of-15-min to hours
+        def numfmt(m, pos):  # your custom formatter function: divide by 100.0
+            h = '{}'.format(m / 4)
+            return h
+        ax.xaxis.set_major_formatter(FuncFormatter(numfmt))
+
+        # Major ticks every 4 hours
+        # ticks = range(0, ceil(max(time_list3) / 60) + 4, 4)
+        # plt.xticks(ticks, ticks)
+        # # ax.set_xticklabels(list(ticks))
+        # ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+        # Add label to axes
+        plt.title('Pores output over time')
+        plt.ylabel('Reads per 15 minutes')
+        plt.xlabel('Sequencing time (hours)')
+
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig = g.get_figure()  # Get figure from FacetGrid
+        fig.savefig(self.output_folder + "/pores_output_vs_time.png")
 
     def make_summary_plots(self, d):
         pass
