@@ -21,10 +21,11 @@ from contextlib import closing
 from math import ceil
 import subprocess
 import gzip
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.4'
+__version__ = '0.2.5'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -1291,16 +1292,28 @@ class NanoQC(object):
 
         # Account if there is no fail data or no pass data
         if ts_fail3 and ts_pass3:
-            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
-            g.figure.suptitle('Phred score evolution')
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
+            g.figure.suptitle('Sequence quality over time')
         elif ts_pass3:
-            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, inner=None)
-            g.figure.suptitle('Phred score evolution\n(pass)')
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (pass only)')
         else:  # elif ts_fail3:
-            g = sns.violinplot(x='Time (h)', y='Phred Score', data=data, inner=None)
-            g.figure.suptitle('Phred score evolution\n(fail)')
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (fail only)')
 
-        plt.tight_layout()
+        # Major ticks every 4 hours
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+        # https://matplotlib.org/2.0.2/examples/ticks_and_spines/tick-locators.html
+        def my_formater(val, pos):
+            val_str = '{}-{}'.format(int(val), int(val + 1))
+            return val_str
+
+        ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+        ax.xaxis.set_major_locator(MultipleLocator(4))
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(self.output_folder + "/quality_vs_time.png")
 
     def plot_phred_score_distribution(self, d):
@@ -1804,7 +1817,6 @@ class NanoQC(object):
         # g.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
 
     def pores_output_vs_time(self, d):
-        from matplotlib.ticker import FuncFormatter, MaxNLocator
 
         time_list = list()
         for seq_id, seq in d.items():
@@ -1838,10 +1850,15 @@ class NanoQC(object):
         ax.xaxis.set_major_formatter(FuncFormatter(numfmt))
 
         # Major ticks every 4 hours
+        def my_formater(val, pos):
+            val_str = '{}'.format(int(val/4))
+            return val_str
+
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
         # ticks = range(0, ceil(max(time_list3) / 60) + 4, 4)
-        # plt.xticks(ticks, ticks)
-        # # ax.set_xticklabels(list(ticks))
-        # ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+        # ax.xaxis.set_major_locator(MaxNLocator(len(ticks), integer=True))
+        ax.xaxis.set_major_locator(MultipleLocator(4 * 4))  # 4 block of 15 min per hour. Want every 4 hours
 
         # Add label to axes
         plt.title('Pores output over time')
