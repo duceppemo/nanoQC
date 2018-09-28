@@ -25,7 +25,7 @@ from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.5'
+__version__ = '0.2.6'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -1269,7 +1269,7 @@ class NanoQC(object):
             ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
             ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
 
-            df_pass = pd.DataFrame(list(ts_pass3), columns=['Time (h)', 'Phred Score'])  # Convert to dataframe
+            df_pass = pd.DataFrame(list(ts_pass3), columns=['Sequencing time interval (h)', 'Phred score'])  # Convert to dataframe
             df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
         if ts_fail:
@@ -1278,7 +1278,7 @@ class NanoQC(object):
             ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
             ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
 
-            df_fail = pd.DataFrame(list(ts_fail3), columns=['Time (h)', 'Phred Score'])
+            df_fail = pd.DataFrame(list(ts_fail3), columns=['Sequencing time interval (h)', 'Phred score'])
             df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
 
         # Account if there is no fail data or no pass data
@@ -1292,13 +1292,13 @@ class NanoQC(object):
 
         # Account if there is no fail data or no pass data
         if ts_fail3 and ts_pass3:
-            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, hue='Flag', split=True, inner=None)
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, hue='Flag', split=True, inner=None)
             g.figure.suptitle('Sequence quality over time')
         elif ts_pass3:
-            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, inner=None)
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
             g.figure.suptitle('Sequence quality over time (pass only)')
         else:  # elif ts_fail3:
-            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred Score', data=data, inner=None)
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
             g.figure.suptitle('Sequence quality over time (fail only)')
 
         # Major ticks every 4 hours
