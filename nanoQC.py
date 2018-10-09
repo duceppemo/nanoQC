@@ -7,6 +7,7 @@ from time import time
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+import matplotlib.gridspec as gridspec
 import multiprocessing as mp
 import threading
 from queue import Queue
@@ -22,6 +23,7 @@ from math import ceil
 import subprocess
 import gzip
 from matplotlib.ticker import FuncFormatter, MultipleLocator
+import matplotlib.patches as mpatches
 
 
 __author__ = 'duceppemo'
@@ -898,6 +900,20 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
+        print('\tPlotting total_bp_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_bp_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_vs_bp_per_sample(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
+
         print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_reads_per_sample_vs_time(d)
@@ -908,20 +924,6 @@ class NanoQC(object):
         print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_bp_per_sample_vs_time(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting total_bp_vs_time...', end="", flush=True)
-        start_time = time()
-        self.plot_total_bp_vs_time(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting quality_vs_time...', end="", flush=True)
-        start_time = time()
-        self.plot_quality_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -940,13 +942,19 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting quality_vs_length_kde...', end="", flush=True)
+        print('\tPlotting pores_output_vs_time...', end="", flush=True)
         start_time = time()
-        self.plot_quality_vs_length_kde(d)
-        # self.test_plot(d)
+        self.pores_output_vs_time(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length...', end="", flush=True)
         start_time = time()
@@ -955,16 +963,10 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        print('\tPlotting quality_vs_length_kde...', end="", flush=True)
         start_time = time()
-        self.plot_reads_vs_bp_per_sample(d)
-        end_time = time()
-        interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting pores_output_vs_time...', end="", flush=True)
-        start_time = time()
-        self.pores_output_vs_time(d)
+        self.plot_quality_vs_length_kde(d)
+        # self.test_plot(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
@@ -1527,6 +1529,8 @@ class NanoQC(object):
         name, length, flag, average_phred, gc, time_string
         """
 
+        sns.set(style="ticks")
+
         my_dict = dict()
         for seq_id, seq in d.items():
             my_dict[seq_id] = [seq.length, seq.average_phred, seq.flag]
@@ -1562,7 +1566,7 @@ class NanoQC(object):
         xx, yy, density = self.kde2D(x, y, 1)
 
         # Create grid object
-        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass)
+        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass, space=0)
 
         cset1 = g.ax_joint.contourf(xx, yy, density, levels=25, cmap="Blues", alpha=0.6)
         # don't shade last contour
@@ -1581,30 +1585,36 @@ class NanoQC(object):
         # Do the same for the fail reads
         ####
 
-        g.x = df_fail['Length (bp)']
-        g.y = df_fail['Phred score']
+        if not df_fail.empty:
+            g.x = df_fail['Length (bp)']
+            g.y = df_fail['Phred score']
 
-        # Do the Kernel Density Estimation (KDE)
-        x = df_fail['Length (bp)']
-        y = df_fail['Phred score']
-        xx, yy, density = self.kde2D(x, y, 1)
+            # Do the Kernel Density Estimation (KDE)
+            x = df_fail['Length (bp)']
+            y = df_fail['Phred score']
+            xx, yy, density = self.kde2D(x, y, 1)
 
-        cset2 = g.ax_joint.contourf(xx, yy, density, levels=25, cmap="Reds", alpha=0.6)
+            cset2 = g.ax_joint.contourf(xx, yy, density, levels=25, cmap="Reds", alpha=0.6)
 
-        # don't shade last contour
-        # https://github.com/mwaskom/seaborn/blob/master/seaborn/distributions.py
-        cset2.collections[0].set_alpha(0)
+            # don't shade last contour
+            # https://github.com/mwaskom/seaborn/blob/master/seaborn/distributions.py
+            cset2.collections[0].set_alpha(0)
 
-        g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
-        g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins, orientation="horizontal")
+            g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
+            g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
+                             orientation="horizontal")
 
-        # Add legend
-        # g.ax_marg_x.legend(('pass', 'fail'), loc='best')
+        # Add legend to the joint plot area
         # https://matplotlib.org/tutorials/intermediate/legend_guide.html
-        import matplotlib.patches as mpatches
         blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
         red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
-        g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+        if not df_fail.empty:
+            g.ax_joint.legend(handles=[blue_patch], loc='best')
+        else:
+            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+
+        # Add legend to top margin_plot area
+        # g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
 
         # Set figure size
         g.fig.set_figwidth(8)
@@ -1627,11 +1637,6 @@ class NanoQC(object):
         :param scatter_kws:
         :return:
         """
-
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec as gridspec
-        import matplotlib.patches as mpatches
 
         sns.set_style('darkgrid')
 
@@ -1684,12 +1689,12 @@ class NanoQC(object):
         ax_main.set_xlim((min_value, max_value))
 
         # Set bin sized for histogram
-        len_logbins = np.logspace(min_exp, max_exp, 50)
+        len_logbins = np.logspace(min_exp, max_exp, 30)
         # Set y-axis limits
         min_phred = min(data.ix[:, 1])
         max_phred = max(data.ix[:, 1])
         # phred_range = max_phred - min_phred
-        phred_bins = np.linspace(min_phred, max_phred, 50)
+        phred_bins = np.linspace(min_phred, max_phred, 15)
 
         # Set the y limits for the marginal plots
         # ax_xhist.set_ylim((min_value, max_value))
