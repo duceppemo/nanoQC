@@ -940,16 +940,17 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
-        # print('\tPlotting quality_vs_length_kde...', end="", flush=True)
-        # start_time = time()
-        # self.plot_quality_vs_length_kde(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print("Took %s" % self.elapsed_time(interval))
+        print('\tPlotting quality_vs_length_kde...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_length_kde(d)
+        # self.test_plot(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length...', end="", flush=True)
         start_time = time()
-        self.plot_quality_vs_length(d)
+        self.plot_quality_vs_length_scatter(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
@@ -1411,13 +1412,9 @@ class NanoQC(object):
         plt.tight_layout()
         fig.savefig(self.output_folder + "/length_distribution.png")
 
-    def plot_quality_vs_length_kde(self, d):
-        """
-        seaborn jointplot (length vs quality)
-        :param d: Dictionary
-        :return: png file
-        name, length, flag, average_phred, gc, time_string
-        """
+    def test_plot(self, d):
+        """ TAKES 50 MIN to run! The KDE part takes way too long."""
+        # from scipy import stat
 
         qs_pass = list()
         qs_fail = list()
@@ -1427,51 +1424,194 @@ class NanoQC(object):
             else:
                 qs_fail.append(tuple((seq.length, seq.average_phred)))
 
-        df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred Score'])
+        df_pass = pd.DataFrame(list(qs_pass), columns=['Length (bp)', 'Phred score'])
         df_pass['flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
-        df_fail = pd.DataFrame(list(qs_fail), columns=['Length (bp)', 'Phred Score'])
+        df_fail = pd.DataFrame(list(qs_fail), columns=['Length (bp)', 'Phred score'])
         df_fail['flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
 
         df_concatenated = pd.concat([df_pass, df_fail])
 
         # Find min and max length values
-        min_len = pd.DataFrame.min(df_concatenated['Length (bp)'])
+        min_len = min(df_concatenated.ix[:, 0])
+        max_len = max(df_concatenated.ix[:, 0])
         min_exp = np.log10(min_len)
-        min_value = float(10 ** (min_exp - 0.1))
-        if min_value <= 0:
-            min_value = 1
-        max_len = pd.DataFrame.max(df_concatenated['Length (bp)'])
         max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
         max_value = float(10 ** (max_exp + 0.1))
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 50)
 
-        # min_len = pd.DataFrame.min(df_pass['Length (bp)'])
-        # min_exp = np.log10(min_len)
-        # min_value = float(10 ** (min_exp - 0.1))
-        # if min_value <= 0:
-        #     min_value = 1
-        # max_len = pd.DataFrame.max(df_pass['Length (bp)'])
-        # max_exp = np.log10(max_len)
-        # max_value = float(10 ** (max_exp + 0.1))
-        # g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='kde',
-        #                   stat_func=None,
-        #                   xlim=[min_value, max_value],
-        #                   space=0,
-        #                   n_levels=50)
-        g = sns.jointplot(x='Length (bp)', y='Phred Score', data=df_pass, kind='reg',
-                          fit_reg=False,
-                          xlim=[min_value, max_value],
-                          space=0,
-                          color='blue',
-                          joint_kws={'alpha':0.3, 's': 3})
-        g.plot_joint(sns.regplot, data=df_fail, fit_reg=False, color='red')
-        ax = g.ax_joint
-        ax.set_xscale('log')
+        # Set y-axis limits
+        min_phred = min(df_concatenated.ix[:, 1])
+        max_phred = max(df_concatenated.ix[:, 1])
+        # phred_range = max_phred - min_phred
+        phred_bins = np.linspace(min_phred, max_phred, 50)
+
+        # Set plot
+        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass, space=0,
+                          xlim=(min_value, max_value), ylim=(min_phred, max_phred))
+
+        # x = df_pass['Length (bp)']
+        # y = df_pass['Phred score']
+        # kde = stats.gaussian_kde([x, y])
+        # xx, yy = np.mgrid[min(x):max(x):(max(x)-min(x))/100, min(y):max(y):(max(y)-min(y))/100]
+        # density = kde(np.c_[xx.flat, yy.flat].T).reshape(xx.shape)
+
+        # Draw plot in top marginal area (x) for pass
+        # sns.kdeplot(df_pass['Length (bp)'], ax=g.ax_marg_x, legend=False, shade=True)
+        g.ax_marg_x.hist(df_pass['Length (bp)'], color='blue', alpha=0.6, bins=len_logbins)
+        # Draw plot in right marginal area (y) for pass
+        # sns.kdeplot(df_pass['Phred score'], ax=g.ax_marg_y, legend=False, shade=True, vertical=True)
+        g.ax_marg_y.hist(df_pass['Phred score'], color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
+        # Draw plot in joint area for pass
+        sns.kdeplot(df_pass['Length (bp)'], df_pass['Phred score'], ax=g.ax_joint,
+                    n_levels=25, cmap="Blues", shade=True, shade_lowest=False, legend=True)
+        # g.ax_joint(sns.kdeplot, n_levels=30, cmap="Blues", shade=True, shade_lowest=False)
+        # g.ax_joint.contourf(xx, yy, density, 10, cmap="Blues")
+
+        # g.x = df_fail['Length (bp)']
+        # g.y = df_fail['Length (bp)']
+        #
+        # Draw plot in top marginal area (x) for fail
+        # sns.kdeplot(df_pass['Length (bp)'], ax=g.ax_marg_x, legend=False, shade=True)
+        g.ax_marg_x.hist(df_fail['Length (bp)'], color='red', alpha=0.6, bins=len_logbins)
+        # Draw plot in right marginal area (y) for fail
+        # sns.kdeplot(df_pass['Phred score'], ax=g.ax_marg_y, legend=False, shade=True, vertical=True)
+        g.ax_marg_y.hist(df_fail['Phred score'], color='red', alpha=0.6, bins=phred_bins, orientation="horizontal")
+        # Draw plot in joint area for fail
+        sns.kdeplot(df_fail['Length (bp)'], df_fail['Phred score'], ax=g.ax_joint,
+                    n_levels=25, cmap="Reds", shade=True, shade_lowest=False)
+
+        # Set xscale to log
+        g.ax_joint.set_xscale('log')
         g.ax_marg_x.set_xscale('log')
+
+        # Set figure size
         g.fig.set_figwidth(8)
         g.fig.set_figheight(4)
 
-        g.savefig(self.output_folder + "/quality_vs_length.png")
+        # Add legend
+        g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
+
+        # Save figure to file
+        g.savefig(self.output_folder + "/quality_vs_length_kde.png")
+
+    def kde2D(self, x, y, bandwidth, xbins=100j, ybins=100j, **kwargs):
+        """
+        # https://stackoverflow.com/questions/41577705/how-does-2d-kernel-density-estimation-in-python-sklearn-work
+        Build 2D kernel density estimate (KDE).
+        """
+
+        from sklearn.neighbors import KernelDensity
+
+        # create grid of sample locations (default: 100x100)
+        xx, yy = np.mgrid[x.min():x.max():xbins,
+                 y.min():y.max():ybins]
+
+        xy_sample = np.vstack([yy.ravel(), xx.ravel()]).T
+        xy_train = np.vstack([y, x]).T
+
+        kde_skl = KernelDensity(bandwidth=bandwidth, **kwargs)
+        kde_skl.fit(xy_train)
+
+        # score_samples() returns the log-likelihood of the samples
+        z = np.exp(kde_skl.score_samples(xy_sample))
+        return xx, yy, np.reshape(z, xx.shape)
+
+    def plot_quality_vs_length_kde(self, d):
+        """
+        seaborn jointplot (length vs quality)
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [seq.length, seq.average_phred, seq.flag]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length (bp)', 'Phred score', 'flag'])
+        df_pass = df.loc[df['flag'] == 'pass']
+        df_fail = df.loc[df['flag'] == 'fail']
+
+        # Set x-axis limits
+        min_len = min(df.ix[:, 0])
+        max_len = max(df.ix[:, 0])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        max_value = float(10 ** (max_exp + 0.1))
+
+        # Set bin sized for histogram
+        # len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set y-axis limits
+        min_phred = min(df.ix[:, 1])
+        max_phred = max(df.ix[:, 1])
+
+        # Set bin sized for histogram
+        phred_bins = np.linspace(min_phred, max_phred, 15)
+
+        # Do the Kernel Density Estimation (KDE)
+        x = df_pass['Length (bp)']
+        y = df_pass['Phred score']
+        xx, yy, density = self.kde2D(x, y, 1)
+
+        # Create grid object
+        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass)
+
+        cset1 = g.ax_joint.contourf(xx, yy, density, levels=25, cmap="Blues", alpha=0.6)
+        # don't shade last contour
+        # https://github.com/mwaskom/seaborn/blob/master/seaborn/distributions.py
+        cset1.collections[0].set_alpha(0)
+
+        g.ax_marg_x.hist(x, histtype='stepfilled', color='blue', alpha=0.6, bins=len_logbins)
+        g.ax_marg_y.hist(y, histtype='stepfilled', color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
+
+        # Set main plot x axis scale to log
+        g.ax_joint.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+        g.ax_joint.set_xlim((min_value, max_value))
+
+        ####
+        # Do the same for the fail reads
+        ####
+
+        g.x = df_fail['Length (bp)']
+        g.y = df_fail['Phred score']
+
+        # Do the Kernel Density Estimation (KDE)
+        x = df_fail['Length (bp)']
+        y = df_fail['Phred score']
+        xx, yy, density = self.kde2D(x, y, 1)
+
+        cset2 = g.ax_joint.contourf(xx, yy, density, levels=25, cmap="Reds", alpha=0.6)
+
+        # don't shade last contour
+        # https://github.com/mwaskom/seaborn/blob/master/seaborn/distributions.py
+        cset2.collections[0].set_alpha(0)
+
+        g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
+        g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins, orientation="horizontal")
+
+        # Add legend
+        # g.ax_marg_x.legend(('pass', 'fail'), loc='best')
+        # https://matplotlib.org/tutorials/intermediate/legend_guide.html
+        import matplotlib.patches as mpatches
+        blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
+        red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
+        g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+
+        # Set figure size
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
+
+        # Save figure to file
+        g.savefig(self.output_folder + "/quality_vs_length_kde.png")
 
     def jointplot_w_hue(self, data, x, y, hue=None, colormap=None,
                         figsize=None, fig=None, scatter_kws=None):
@@ -1600,7 +1740,7 @@ class NanoQC(object):
 
         return dict(fig=fig, gridspec=grid)
 
-    def plot_quality_vs_length(self, d):
+    def plot_quality_vs_length_scatter(self, d):
         qs_pass = list()
         qs_fail = list()
         for seq_id, seq in d.items():
@@ -1628,7 +1768,7 @@ class NanoQC(object):
                                  hue='flag', figsize=(10, 6), fig=fig, colormap=['blue'],
                                  scatter_kws={'s': 1, 'alpha': 0.1})
 
-        fig.savefig(self.output_folder + "/quality_vs_length.png")
+        fig.savefig(self.output_folder + "/quality_vs_length_scatter.png")
 
     def plot_test_old(self, d):
         """
@@ -1678,12 +1818,6 @@ class NanoQC(object):
         ax_main = plt.subplot(grid[1, 0])
         ax_xhist = plt.subplot(grid[0, 0], sharex=ax_main)
         ax_yhist = plt.subplot(grid[1, 1])  # , sharey=ax_main)
-
-
-
-
-
-
 
         gs = gridspec.GridSpec(2, 2, width_ratios=[3, 1], height_ratios=[1, 4],
                                hspace=0, wspace=0)
