@@ -27,7 +27,7 @@ import matplotlib.patches as mpatches
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.6'
+__version__ = '0.3'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -38,7 +38,7 @@ __version__ = '0.2.6'
 # TODO -> add option to use the "sequencing_summary.txt" file as input instead of the fastq files
 
 
-class MyObjects(object):
+class FastqObjects(object):
     def __init__(self, name, length, flag, average_phred, gc, time_string):
         # Create seq object with its attributes
         self.name = name
@@ -47,6 +47,26 @@ class MyObjects(object):
         self.average_phred = average_phred
         self.gc = gc
         self.time_string = time_string
+
+
+class SummaryObjects(object):
+    def __init__(self, name, length, channel, events, average_phred, time_stamp, flag):
+        # Create seq object with its attributes
+        self.name = name
+        self.channel = channel
+        self.events = events
+        self.time_stamp = time_stamp
+        self.length = length
+        self.flag = flag
+        self.average_phred = average_phred
+
+
+class Layout(object):
+    def __init__(self, structure, template, xticks, yticks):
+        self.structure = structure
+        self.template = template
+        self.xticks = xticks
+        self.yticks = yticks
 
 
 class NanoQC(object):
@@ -265,7 +285,7 @@ class NanoQC(object):
         c_count = float(seq.count(b'C'))
         gc = int(round((g_count + c_count) / float(length) * 100))
 
-        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
+        seq = FastqObjects(name, length, flag, average_phred, gc, time_string)
 
         my_dict[seq_id] = seq
 
@@ -295,7 +315,7 @@ class NanoQC(object):
         c_count = float(seq.count('C'))
         gc = int(round((g_count + c_count) / float(length) * 100))
 
-        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
+        seq = FastqObjects(name, length, flag, average_phred, gc, time_string)
         d[seq_id] = seq
 
     def parse_fastq_to_dict_islice_pool(self, l, name, flag):
@@ -325,7 +345,7 @@ class NanoQC(object):
         c_count = float(seq.count('C'))
         gc = int(round((g_count + c_count) / float(length) * 100))
 
-        seq = MyObjects(name, length, flag, average_phred, gc, time_string)
+        seq = FastqObjects(name, length, flag, average_phred, gc, time_string)
         my_dict[seq_id] = seq
 
         return my_dict
@@ -852,43 +872,6 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took {}".format(self.elapsed_time(interval)))
 
-    def parse_summary(self, d):
-        """
-        Parse "sequencing_summary.txt" file from Albacore
-        :param d: Empty summary dictionary
-        :return: Dictionary with info about
-        """
-
-        start_time = time()
-        with open(self.input_summary, 'rb', 1024 * 1024) as file_handle:
-            fields = list()
-            read_counter = 0
-            next(file_handle)  # skip first line
-            for line in file_handle:
-                line = line.rstrip()
-                fields.append(line.split(b"\t"))
-                if not line:
-                    continue
-
-                # Only keep  fields of interest
-                name = fields[19]
-                seqid = fields[1]
-                channel = fields[3]
-                events = fields[6]
-                start_time = fields[4]
-                flag = fields[7]
-
-                # Populate the dictionary
-                d[name][seqid]['channel'] = channel
-                d[name][seqid]['events'] = events
-                d[name][seqid]['start_time'] = start_time
-                d[name][seqid]['flag'] = flag
-
-        # Print read stats
-        end_time = time()
-        interval = end_time - start_time
-        print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
-
     def make_fastq_plots(self, d):
 
         print("\nMaking plots:")
@@ -956,9 +939,16 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting quality_vs_length...', end="", flush=True)
+        print('\tPlotting quality_vs_length_scatter...', end="", flush=True)
         start_time = time()
         self.plot_quality_vs_length_scatter(d)
+        end_time = time()
+        interval = end_time - start_time
+        print("Took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_length_hex...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_length_hex(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
@@ -1020,12 +1010,10 @@ class NanoQC(object):
             y_pass = range(1, len(t_pass) + 1, 1)  # Create range. 1 time point equals 1 read
 
         if t_fail:
-            y_fail = list()
-            if t_fail:
-                t_fail[:] = [x - t_zero for x in t_fail]
-                t_fail.sort()
-                t_fail[:] = [x.days * 24 + x.seconds / 3600 for x in t_fail]
-                y_fail = range(1, len(t_fail) + 1, 1)
+            t_fail[:] = [x - t_zero for x in t_fail]
+            t_fail.sort()
+            t_fail[:] = [x.days * 24 + x.seconds / 3600 for x in t_fail]
+            y_fail = range(1, len(t_fail) + 1, 1)
 
         # Create plot
         if t_pass and t_fail:
@@ -1314,7 +1302,8 @@ class NanoQC(object):
         ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
         ax.xaxis.set_major_locator(MultipleLocator(4))
 
-        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        if ts_fail:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(self.output_folder + "/quality_vs_time.png")
@@ -1609,9 +1598,9 @@ class NanoQC(object):
         blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
         red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
         if not df_fail.empty:
-            g.ax_joint.legend(handles=[blue_patch], loc='best')
-        else:
             g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+        else:
+            g.ax_joint.legend(handles=[blue_patch], loc='best')
 
         # Add legend to top margin_plot area
         # g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
@@ -1622,6 +1611,99 @@ class NanoQC(object):
 
         # Save figure to file
         g.savefig(self.output_folder + "/quality_vs_length_kde.png")
+
+    def plot_quality_vs_length_hex(self, d):
+        """
+        seaborn jointplot (length vs quality)
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        sns.set(style="ticks")
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [seq.length, seq.average_phred, seq.flag]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length (bp)', 'Phred score', 'flag'])
+        df_pass = df.loc[df['flag'] == 'pass']
+        df_fail = df.loc[df['flag'] == 'fail']
+
+        # Set x-axis limits
+        min_len = min(df.ix[:, 0])
+        max_len = max(df.ix[:, 0])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        max_value = float(10 ** (max_exp + 0.1))
+
+        # Set bin sized for histogram
+        # len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set y-axis limits
+        min_phred = min(df.ix[:, 1])
+        max_phred = max(df.ix[:, 1])
+
+        # Set bin sized for histogram
+        phred_bins = np.linspace(min_phred, max_phred, 15)
+
+        # Do the Kernel Density Estimation (KDE)
+        x = df_pass['Length (bp)']
+        y = df_pass['Phred score']
+        xx, yy, density = self.kde2D(x, y, 1)
+
+        # Create grid object
+        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass, space=0)
+
+        cset1 = g.ax_joint.hexbin(x, y, gridsize=50, cmap="Blues", xscale='log', alpha=0.6, mincnt=1)
+        g.ax_joint.axis([min_value, max_value, min_phred, max_phred])
+        g.ax_marg_x.hist(x, histtype='stepfilled', color='blue', alpha=0.6, bins=len_logbins)
+        g.ax_marg_y.hist(y, histtype='stepfilled', color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
+
+        # Set main plot x axis scale to log
+        g.ax_joint.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+        g.ax_joint.set_xlim((min_value, max_value))
+
+        ####
+        # Do the same for the fail reads
+        ####
+
+        if not df_fail.empty:
+            g.x = df_fail['Length (bp)']
+            g.y = df_fail['Phred score']
+
+            # Do the Kernel Density Estimation (KDE)
+            x = df_fail['Length (bp)']
+            y = df_fail['Phred score']
+
+            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1)
+            g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
+            g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
+                             orientation="horizontal")
+
+        # Add legend to the joint plot area
+        # https://matplotlib.org/tutorials/intermediate/legend_guide.html
+        blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
+        red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
+        if not df_fail.empty:
+            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+        else:
+            g.ax_joint.legend(handles=[blue_patch], loc='best')
+
+        # Add legend to top margin_plot area
+        # g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
+
+        # Set figure size
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
+
+        # Save figure to file
+        g.savefig(self.output_folder + "/quality_vs_length_hex.png")
 
     def jointplot_w_hue(self, data, x, y, hue=None, colormap=None,
                         figsize=None, fig=None, scatter_kws=None):
@@ -2008,8 +2090,859 @@ class NanoQC(object):
         fig = g.get_figure()  # Get figure from FacetGrid
         fig.savefig(self.output_folder + "/pores_output_vs_time.png")
 
+    # Should do plot(s) with the %GC, which you can't get with the summary file.
+
+    # Summary plots
+
+    def parse_summary(self, d):
+        """
+        Parse "sequencing_summary.txt" file from Albacore
+        :param d: Empty summary dictionary
+        :return: Dictionary with info about
+        """
+
+        print("Parsing summary file...", end='', flush=True)
+        start_time = time()
+        with open(self.input_summary, 'rb', 1024 * 1024 * 8) as file_handle:
+            # fields = list()
+            read_counter = 0
+            next(file_handle)  # skip first line
+            for line in file_handle:
+                line = line.rstrip()
+                if not line:
+                    continue
+
+                fields = line.split(b'\t')
+
+                # Only keep  fields of interest
+                length = fields[12]
+                if length == b'0':
+                    continue  # skip zero-length reads
+                seq_id = fields[1]
+                channel = fields[3]
+                events = fields[6]
+                flag = fields[7]
+                name = fields[19]
+                time_stamp = fields[4]
+                average_phred = fields[13]
+
+                seq_summary = SummaryObjects(name, length, channel, events, average_phred, time_stamp, flag)
+
+                d[seq_id] = seq_summary
+                read_counter += 1
+
+        # Print read stats
+        end_time = time()
+        interval = end_time - start_time
+        print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+
     def make_summary_plots(self, d):
-        pass
+        print("\nMaking plots:")
+
+        # print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_total_reads_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting total_bp_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_total_bp_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_reads_per_sample_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_bp_per_sample_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting length_distribution...', end="", flush=True)
+        # start_time = time()
+        # self.plot_length_distribution_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting phred_score_distribution...', end="", flush=True)
+        # start_time = time()
+        # self.plot_phred_score_distribution_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting quality_vs_length_hex...', end="", flush=True)
+        # start_time = time()
+        # self.plot_quality_vs_length_hex_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        # start_time = time()
+        # self.plot_reads_vs_bp_per_sample_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting pores_output_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_pores_output_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+
+        # print('\tPlotting channel_output_total...', end="", flush=True)
+        # start_time = time()
+        # self.plot_channel_output_total(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting channel_output_pass_fail...', end="", flush=True)
+        start_time = time()
+        self.plot_channel_output_pass_fail(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+    def plot_total_reads_vs_time_summary(self, d):
+        """
+        Plot number of reads against running time. Both Pass and fail reads in the same graph
+        :param d: A dictionary to store the relevant information about each sequence
+        :return: A png file with the graph
+        TODO -> use numpy to handle the plot data, on row per sample?
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, ax = plt.subplots()
+        t_pass = list()  # time
+        t_fail = list()
+
+        for seq_id, seq in d.items():
+            t = seq.time_stamp
+            if seq.flag == b'True':
+                t_pass.append(t)
+            else:
+                t_fail.append(t)
+
+        # Prepare datetime value for plotting
+        # Convert time object in hours from beginning of run
+        y_pass = None
+        y_fail = None
+        if t_pass:
+            t_pass[:] = [float(x) / 3600 for x in t_pass]  # Convert to hours (float)
+            t_pass.sort()  # Sort
+            y_pass = range(1, len(t_pass) + 1, 1)  # Create range. 1 time point equals 1 read
+
+        if t_fail:
+            t_fail[:] = [float(x) / 3600 for x in t_fail]
+            t_fail.sort()
+            y_fail = range(1, len(t_fail) + 1, 1)
+
+        # Create plot
+        if t_pass and t_fail:
+            ax.plot(t_pass, y_pass, color='blue')
+            ax.plot(t_fail, y_fail, color='red')
+            ax.legend(['Pass', 'Fail'])
+        elif t_pass:
+            ax.plot(t_pass, y_pass, color='blue')
+            ax.legend(['Pass'])
+        elif t_fail:
+            ax.plot(t_fail, y_fail, color='red')
+            ax.legend(['Fail'])
+
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Total read yield')
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/total_reads_vs_time.png")
+
+    def plot_reads_per_sample_vs_time_summary(self, d):
+        """
+        Plot yield per sample. Just the pass reads
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        # fig, ax = plt.subplots()
+        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
+
+        # Fetch required information
+        my_sample_dict = defaultdict()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                my_sample_dict[seq.name][seq_id] = seq.time_stamp
+
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # Make the plot
+        legend_names = list()
+        for name, seq_ids in od.items():
+            name = name.decode('ascii')
+            legend_names.append(name)
+            ts_pass = list()
+            for seq, time_tag in seq_ids.items():
+                ts_pass.append(time_tag)
+
+            ts_pass[:] = [float(x) / 3600 for x in ts_pass]  # Convert to hours (float)
+            ts_pass.sort()  # Sort
+            ys_pass = range(1, len(ts_pass) + 1, 1)  # Create range. 1 time point equals 1 read
+
+            # ax.plot(ts_pass, ys_pass)
+            ax.plot(ts_pass, ys_pass,
+                    label="%s (%s)" % (name, "{:,}".format(max(ys_pass))))
+            # ax.legend(legend_names)
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+        ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Pass reads per sample')
+        ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        # comma-separated numbers to the y axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()  #
+        fig.savefig(self.output_folder + "/reads_per_sample_vs_time.png")
+
+    def plot_bp_per_sample_vs_time_summary(self, d):
+        """
+        Read length per sample vs time
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
+
+        # Fetch required information
+        my_sample_dict = defaultdict()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                my_sample_dict[seq.name][seq_id] = (seq.time_stamp, seq.length)  # tuple
+
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # Make the plot
+        for name, seq_ids in od.items():
+            name = name.decode('ascii')
+            ts_pass = list()
+            for seq, data_tuple in seq_ids.items():
+                ts_pass.append(data_tuple)
+
+            # Prepare x values (time)
+            ts_pass[:] = [tuple(((float(x) / 3600), int(y))) for x, y in ts_pass]  # Convert to hours (float)
+            ts_pass.sort(key=lambda x: x[0])  # Sort according to first element in tuples
+            x_values = [x for x, y in ts_pass]  # Only get the fist value of the ordered tuples
+
+            # Prepare y values in a cumulative way
+            c = 0
+            y_values = list()
+            for x, y in ts_pass:
+                y = y + c
+                y_values.append(y)
+                c = y
+
+            # Plot values per sample
+            ax.plot(x_values, y_values,
+                    label="%s (%s)" % (name, "{:,}".format(max(y_values))))
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)  # New
+        # Add axes labels
+        ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Yield per sample in base pair\n("pass" only)')
+        ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()
+        # Save figure to file
+        fig.savefig(self.output_folder + "/bp_per_sample_vs_time.png")
+
+    def plot_total_bp_vs_time_summary(self, d):
+        """
+        Sequence length vs time
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, ax = plt.subplots()
+
+        # Fetch required information
+        ts_pass = list()
+        ts_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                ts_pass.append(tuple((seq.time_stamp, seq.length)))
+            else:
+                ts_fail.append(tuple((seq.time_stamp, seq.length)))
+
+        x_pass_values = None
+        y_pass_values = None
+        x_fail_values = None
+        y_fail_values = None
+        if ts_pass:
+            ts_pass[:] = [tuple(((float(x) / 3600), int(y))) for x, y in ts_pass]  # Convert to hours (float)
+            ts_pass.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+            x_pass_values = [x for x, y in ts_pass]
+            c = 0
+            y_pass_values = list()
+            for x, y in ts_pass:
+                y = y + c
+                y_pass_values.append(y)
+                c = y
+        if ts_fail:
+            ts_fail[:] = [tuple(((float(x) / 3600), int(y))) for x, y in ts_fail]
+            ts_fail.sort(key=lambda x: x[0])
+            x_fail_values = [x for x, y in ts_fail]
+            c = 0
+            y_fail_values = list()
+            for x, y in ts_fail:
+                y = y + c
+                y_fail_values.append(y)
+                c = y
+
+        # Print plot
+        if ts_pass and ts_fail:
+            ax.plot(x_pass_values, y_pass_values, color='blue')
+            ax.plot(x_fail_values, y_fail_values, color='red')
+            ax.legend(['Pass', 'Fail'])
+        elif ts_pass:
+            ax.plot(x_pass_values, y_pass_values, color='blue')
+            ax.legend(['Pass'])
+        else:  # elif ts_fail:
+            ax.plot(x_fail_values, y_fail_values, color='red')
+            ax.legend(['Fail'])
+        ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Total yield in base pair')
+        ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/total_bp_vs_time.png")
+
+        def plot_quality_vs_time_summary(self, d):
+            """
+            Quality vs time (bins of 1h). Violin plot
+            :param d: Dictionary
+            :return: png file
+            name, length, flag, average_phred, gc, time_string
+            """
+
+            fig, ax = plt.subplots(figsize=(10, 4))
+
+            ts_pass = list()
+            ts_fail = list()
+            for seq_id, seq in d.items():
+                if seq.flag == 'pass':
+                    #         average_phred = round(average_phred_full, 1)
+                    ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+                else:
+                    ts_fail.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+
+            ts_zero_pass = None
+            ts_zero_fail = None
+            if ts_pass:
+                ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+
+            if ts_fail:
+                ts_zero_fail = min(ts_fail, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+
+            if ts_pass and ts_fail:
+                ts_zero = min(ts_zero_pass, ts_zero_fail)
+            elif ts_pass:
+                ts_zero = ts_zero_pass
+            else:  # elif ts_fail:
+                ts_zero = ts_zero_fail
+
+            ts_pass3 = list()
+            ts_fail3 = list()
+            if ts_pass:
+                ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
+                ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+                ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
+                ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
+
+                df_pass = pd.DataFrame(list(ts_pass3),
+                                       columns=['Sequencing time interval (h)', 'Phred score'])  # Convert to dataframe
+                df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+
+            if ts_fail:
+                ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
+                ts_fail1.sort(key=lambda x: x[0])
+                ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
+                ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
+
+                df_fail = pd.DataFrame(list(ts_fail3), columns=['Sequencing time interval (h)', 'Phred score'])
+                df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+            # Account if there is no fail data or no pass data
+            if ts_fail3 and ts_pass3:
+                frames = [df_pass, df_fail]
+                data = pd.concat(frames)  # Merge dataframes
+            elif ts_pass3:
+                data = df_pass
+            else:  # elif ts_fail3:
+                data = df_fail
+
+            # Account if there is no fail data or no pass data
+            if ts_fail3 and ts_pass3:
+                g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, hue='Flag', split=True,
+                                   inner=None)
+                g.figure.suptitle('Sequence quality over time')
+            elif ts_pass3:
+                g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
+                g.figure.suptitle('Sequence quality over time (pass only)')
+            else:  # elif ts_fail3:
+                g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
+                g.figure.suptitle('Sequence quality over time (fail only)')
+
+            # Major ticks every 4 hours
+            # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+            # https://matplotlib.org/2.0.2/examples/ticks_and_spines/tick-locators.html
+            def my_formater(val, pos):
+                val_str = '{}-{}'.format(int(val), int(val + 1))
+                return val_str
+
+            ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+            ax.xaxis.set_major_locator(MultipleLocator(4))
+
+            if ts_fail:
+                plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
+            fig.savefig(self.output_folder + "/quality_vs_time.png")
+
+    def plot_phred_score_distribution_summary(self, d):
+        """
+        Frequency of phred scores
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, ax = plt.subplots()
+
+        qual_pass = list()
+        qual_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                qual_pass.append(round(float(seq.average_phred), 1))
+            else:
+                qual_fail.append(round(float(seq.average_phred), 1))
+
+        mean_pass_qual = None
+        mean_fail_qual = None
+        if qual_pass:
+            mean_pass_qual = np.round(np.mean(qual_pass), 1)
+
+        if qual_fail:
+            mean_fail_qual = np.round(np.mean(qual_fail), 1)
+
+        # Print plot
+        if qual_pass and qual_fail:
+            ax.hist([qual_pass, qual_fail],
+                    bins=np.arange(min(min(qual_pass), min(qual_fail)), max(max(qual_pass), max(qual_fail))),
+                    color=['blue', 'red'],
+                    label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
+        elif qual_pass:
+            ax.hist(qual_pass,
+                    bins=np.arange(min(qual_pass), max(qual_pass)),
+                    color='blue',
+                    label="pass (Avg: %s)" % mean_pass_qual)
+        else:
+            ax.hist(qual_fail,
+                    bins=np.arange(min(qual_fail), max(qual_fail)),
+                    color='red',
+                    label="fail (Avg: %s)" % mean_fail_qual)
+        plt.legend()
+        ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/phred_score_distribution.png")
+
+    def plot_length_distribution_summary(self, d):
+        """
+        Frequency of sizes. Bins auto-sized based on length distribution. Log scale x-axis.
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        size_pass = list()
+        size_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                size_pass.append(int(seq.length))
+            else:
+                size_fail.append(int(seq.length))
+
+        mean_fail_size = None
+        mean_pass_size = None
+        if size_fail:  # assume "pass" always present
+            min_len = min(min(size_pass), min(size_fail))
+            max_len = max(max(size_pass), max(size_fail))
+            mean_pass_size = np.round(np.mean(size_pass), 1)
+            mean_fail_size = np.round(np.mean(size_fail), 1)
+        elif size_pass:
+            min_len = min(size_pass)
+            max_len = max(size_pass)
+            mean_pass_size = np.round(np.mean(size_pass), 1)
+        else:
+            print("No reads detected!")
+            return
+
+        # Print plot
+        fig, ax = plt.subplots()
+        binwidth = int(np.round(10 * np.log10(max_len - min_len)))
+        logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
+        if size_fail:
+            plt.hist([size_pass, size_fail],
+                     bins=logbins,
+                     color=['blue', 'red'],
+                     label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
+        else:
+            plt.hist(size_pass, bins=logbins, color='blue', label="pass (Avg: %s)" % mean_pass_size)
+        plt.legend()
+        plt.xscale('log')
+        ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/length_distribution.png")
+
+    def plot_quality_vs_length_hex_summary(self, d):
+        """
+        seaborn jointplot (length vs quality)
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        sns.set(style="ticks")
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [int(seq.length), float(seq.average_phred), seq.flag.decode('ascii')]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length (bp)', 'Phred score', 'flag'])
+        df_pass = df.loc[df['flag'] == 'True']
+        df_fail = df.loc[df['flag'] == 'False']
+
+        # Set x-axis limits
+        min_len = min(df['Length (bp)'])
+        max_len = max(df['Length (bp)'])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        max_value = float(10 ** (max_exp + 0.1))
+
+        # Set bin sized for histogram
+        # len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 50)
+
+        # Set y-axis limits
+        min_phred = min(df['Phred score'])
+        max_phred = max(df['Phred score'])
+
+        # Set bin sized for histogram
+        phred_bins = np.linspace(min_phred, max_phred, 30)
+
+        # Do the Kernel Density Estimation (KDE)
+        x = df_pass['Length (bp)']
+        y = df_pass['Phred score']
+
+        # Create grid object
+        g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass, space=0)
+
+        g.ax_joint.hexbin(x, y, gridsize=50, cmap="Blues", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
+        g.ax_joint.axis([min_value, max_value, min_phred, max_phred])
+        g.ax_marg_x.hist(x, histtype='stepfilled', color='blue', alpha=0.6, bins=len_logbins)
+        g.ax_marg_y.hist(y, histtype='stepfilled', color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
+
+        # Set main plot x axis scale to log
+        g.ax_joint.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+        g.ax_joint.set_xlim((min_value, max_value))
+
+        ####
+        # Do the same for the fail reads
+        ####
+
+        if not df_fail.empty:
+            g.x = df_fail['Length (bp)']
+            g.y = df_fail['Phred score']
+
+            # Do the Kernel Density Estimation (KDE)
+            x = df_fail['Length (bp)']
+            y = df_fail['Phred score']
+
+            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1,edgecolor='none')
+            g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
+            g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
+                             orientation="horizontal")
+
+        # Add legend to the joint plot area
+        # https://matplotlib.org/tutorials/intermediate/legend_guide.html
+        blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
+        red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
+        if not df_fail.empty:
+            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='upper left')
+        else:
+            g.ax_joint.legend(handles=[blue_patch], loc='upper left')
+
+        # Add legend to top margin_plot area
+        # g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
+
+        # Set figure size
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
+
+        # Save figure to file
+        g.savefig(self.output_folder + "/quality_vs_length_hex.png")
+
+    def plot_reads_vs_bp_per_sample_summary(self, d):
+        # Fetch required information
+        my_sample_dict = defaultdict()  # to get the lengths (bp)
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                length = int(seq.length)
+                if length == 0:
+                    continue
+                name = seq.name.decode('ascii')
+                if name not in my_sample_dict:
+                    my_sample_dict[name] = defaultdict()
+                if not my_sample_dict[name]:
+                    my_sample_dict[name] = [length]
+                else:
+                    my_sample_dict[name].append(length)
+
+        # Order the dictionary by keys
+        od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # Create pandas dataframe
+        df = pd.DataFrame(columns=['Sample', 'bp', 'reads'])
+        for name, size_list in od.items():
+            df = df.append({'Sample': name, 'bp': sum(size_list), 'reads': len(size_list)}, ignore_index=True)
+
+        fig, ax1 = plt.subplots(figsize=(10, 6))  # In inches
+
+        ind = np.arange(len(df['Sample']))
+        width = 0.35
+        p1 = ax1.bar(ind, df['bp'], width, color='#4B9BFF', bottom=0, edgecolor='black')
+
+        ax2 = ax1.twinx()
+        p2 = ax2.bar(ind+width, df['reads'], width, color='#FFB46E', bottom=0, edgecolor='black')
+
+        ax1.set_title('Total Size Versus Total Reads Per Sample')
+        ax1.set_xticks(ind + width / 2)
+        ax1.set_xticklabels(tuple(df['Sample']), rotation=45, ha='right')
+
+        ax1.grid(False)
+        ax2.grid(False)
+
+        ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
+        ax1.legend((p1[0], p2[0]), ('bp', 'reads'), bbox_to_anchor=(1.1, 1), loc=2)
+        ax1.yaxis.set_units('Total bp')
+        ax2.yaxis.set_units('Total reads')
+        ax1.autoscale_view()
+
+        plt.tight_layout()
+        fig.savefig(self.output_folder + "/reads_vs_bp_per_sample.png")
+
+    def plot_pores_output_vs_time_summary(self, d):
+
+        time_list = list()
+        for seq_id, seq in d.items():
+            time_list.append(seq.time_stamp)
+
+        time_list[:] = [float(x) / 60 for x in time_list]  # Convert to minutes (float)
+        time_list[:] = [int(np.round(x)) for x in time_list]  # Round minutes
+        # Check how many 15-minute bins are required to plot all the data
+        nbins = max(time_list) / 15 if max(time_list) % 15 == 0 else int(max(time_list) / 15) + 1
+        # Create the bin boundaries
+        x_bins = np.linspace(min(time_list), max(time_list), nbins)  # every 15 min
+
+        # Generate counts for each bin
+        hist, edges = np.histogram(time_list, bins=x_bins, density=False)
+
+        fig, ax = plt.subplots()
+
+        # Plot the data
+        g = sns.scatterplot(data=hist, x_bins=edges, legend=False, size=3, alpha=0.5, linewidth=0)
+
+        # Adjust format of numbers for y axis: "1000000" -> "1,000,000"
+        g.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
+        # Change x axis labels chunk-of-15-min to hours
+        def numfmt(m, pos):  # your custom formatter function: divide by 100.0
+            h = '{}'.format(m / 4)
+            return h
+        ax.xaxis.set_major_formatter(FuncFormatter(numfmt))
+
+        # Major ticks every 4 hours
+        def my_formater(val, pos):
+            val_str = '{}'.format(int(val/4))
+            return val_str
+
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+        # ticks = range(0, ceil(max(time_list3) / 60) + 4, 4)
+        ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+        # ax.xaxis.set_major_locator(MaxNLocator(len(ticks), integer=True))
+        ax.xaxis.set_major_locator(MultipleLocator(4 * 4))  # 4 block of 15 min per hour. Want every 4 hours
+
+        # Add label to axes
+        plt.title('Pores output over time')
+        plt.ylabel('Reads per 15 minutes')
+        plt.xlabel('Sequencing time (hours)')
+
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig = g.get_figure()  # Get figure from FacetGrid
+        fig.savefig(self.output_folder + "/pores_output_vs_time.png")
+
+    def make_layout(self, maxval):
+        """Make the physical layout of the MinION flowcell.
+        based on https://bioinformatics.stackexchange.com/a/749/681
+        returned as a numpy array
+        """
+        if maxval > 512:
+            return Layout(
+                structure=np.concatenate([np.array([list(range(10 * i + 1, i * 10 + 11))
+                                                    for i in range(25)]) + j
+                                          for j in range(0, 3000, 250)],
+                                         axis=1),
+                template=np.zeros((25, 120)),
+                xticks=range(1, 121),
+                yticks=range(1, 26))
+        else:
+            layoutlist = []
+            for i, j in zip(
+                    [33, 481, 417, 353, 289, 225, 161, 97],
+                    [8, 456, 392, 328, 264, 200, 136, 72]):
+                for n in range(4):
+                    layoutlist.append(list(range(i + n * 8, (i + n * 8) + 8, 1)) +
+                                      list(range(j + n * 8, (j + n * 8) - 8, -1)))
+            return Layout(
+                structure=np.array(layoutlist).transpose(),
+                template=np.zeros((16, 32)),
+                xticks=range(1, 33),
+                yticks=range(1, 17))
+
+    def plot_channel_output_total(self, d):
+        """
+        https://github.com/wdecoster/nanoplotter/blob/master/nanoplotter/spatial_heatmap.py#L69
+        https://bioinformatics.stackexchange.com/questions/745/minion-channel-ids-from-albacore/749#749
+
+        :param d: Dictionary
+        :return: png file
+        """
+
+        channel_dict = defaultdict()
+        for seq_id, seq in d.items():
+            length = int(seq.length)
+            if length == 0:
+                continue
+            channel_number = int(seq.channel)
+            # Pass and fail appart
+            # if channel_number not in channel_dict:
+            #     channel_dict[channel_number] = [0, 0]
+            # if seq.flag == b'True':
+            #     channel_dict[channel_number][0] += 1
+            # else:  # seq.flag == b'False':
+            #     channel_dict[channel_number][1] += 1
+
+            # Pass and fail together
+            if channel_number not in channel_dict:
+                channel_dict[channel_number] = 0
+            channel_dict[channel_number] += 1
+
+        # convert to Pandas dataframe
+        df = pd.DataFrame.from_dict(channel_dict, orient='index', columns=['Reads'])
+        # Sort df on value
+        # df = df.sort_values(by='Reads', ascending=True)
+
+        # Plot
+
+        maxval = max(df.index)
+        layout = self.make_layout(maxval=maxval)
+        value_cts = pd.Series(df['Reads'])
+        for entry in value_cts.keys():
+            layout.template[np.where(layout.structure == entry)] = value_cts[entry]
+        plt.figure()
+        ax = sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
+                         xticklabels="auto", yticklabels="auto",
+                         square=True,
+                         cbar_kws={"orientation": "horizontal"},
+                         cmap='Greens',
+                         linewidths=0.20)
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig = ax.get_figure()  # Get figure from FacetGrid
+        fig.savefig(self.output_folder + "/channel_output_total.png")
+
+    def plot_channel_output_pass_fail(self, d):
+        """
+        https://github.com/wdecoster/nanoplotter/blob/master/nanoplotter/spatial_heatmap.py#L69
+        https://bioinformatics.stackexchange.com/questions/745/minion-channel-ids-from-albacore/749#749
+
+        :param d: Dictionary
+        :return: png file
+        """
+
+        channel_dict = defaultdict()
+        for seq_id, seq in d.items():
+            length = int(seq.length)
+            if length == 0:
+                continue
+            channel_number = int(seq.channel)
+            # Pass and fail apart
+            if channel_number not in channel_dict:
+                channel_dict[channel_number] = [0, 0]
+            if seq.flag == b'True':
+                channel_dict[channel_number][0] += 1
+            else:  # seq.flag == b'False':
+                channel_dict[channel_number][1] += 1
+
+        # convert to Pandas dataframe
+        df = pd.DataFrame.from_dict(channel_dict, orient='index', columns=['Pass', 'Fail'])
+        df_pass = df[['Pass']]  # The double square brakets keep the column name
+        df_fail = df[['Fail']]
+
+        # Plot
+        fig, axs = plt.subplots(nrows=2, figsize=(4, 8))
+
+        for i, my_tuple in enumerate([(df_pass, 'Pass', 'Blues'), (df_fail, 'Fail', 'Reds')]):
+            my_df = my_tuple[0]
+            flag = my_tuple[1]
+            cmap = my_tuple[2]
+            maxval = max(my_df.index)  # maximum channel value
+            layout = self.make_layout(maxval=maxval)
+            value_cts = pd.Series(my_df[flag])
+            for entry in value_cts.keys():
+                layout.template[np.where(layout.structure == entry)] = value_cts[entry]
+            sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
+                        xticklabels="auto", yticklabels="auto",
+                        square=True,
+                        cbar_kws={"orientation": "horizontal"},
+                        cmap=cmap,
+                        linewidths=0.20,
+                        ax=axs[i])
+            axs[i].set_title("{} reads output per channel".format(flag))
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/channel_output_pass_fail.png")
 
 
 if __name__ == '__main__':
