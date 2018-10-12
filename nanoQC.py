@@ -27,7 +27,7 @@ import matplotlib.patches as mpatches
 
 
 __author__ = 'duceppemo'
-__version__ = '0.3'
+__version__ = '0.3.1'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -39,7 +39,7 @@ __version__ = '0.3'
 
 
 class FastqObjects(object):
-    def __init__(self, name, length, flag, average_phred, gc, time_string):
+    def __init__(self, name, length, flag, average_phred, gc, time_string, channel):
         # Create seq object with its attributes
         self.name = name
         self.length = length
@@ -47,6 +47,7 @@ class FastqObjects(object):
         self.average_phred = average_phred
         self.gc = gc
         self.time_string = time_string
+        self.channel = channel
 
 
 class SummaryObjects(object):
@@ -283,9 +284,12 @@ class NanoQC(object):
         # GC percentage
         g_count = float(seq.count(b'G'))
         c_count = float(seq.count(b'C'))
-        gc = int(round((g_count + c_count) / float(length) * 100))
+        gc = round((g_count + c_count) / float(length) * 100, 1)
 
-        seq = FastqObjects(name, length, flag, average_phred, gc, time_string)
+        # Channel
+        channel = header.split()[3].split(b'=')[1]
+
+        seq = FastqObjects(name, length, flag, average_phred, gc, time_string, channel)
 
         my_dict[seq_id] = seq
 
@@ -939,12 +943,12 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting quality_vs_length_scatter...', end="", flush=True)
-        start_time = time()
-        self.plot_quality_vs_length_scatter(d)
-        end_time = time()
-        interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        # print('\tPlotting quality_vs_length_scatter...', end="", flush=True)
+        # start_time = time()
+        # self.plot_quality_vs_length_scatter(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print("Took %s" % self.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length_hex...', end="", flush=True)
         start_time = time()
@@ -953,10 +957,31 @@ class NanoQC(object):
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting quality_vs_length_kde...', end="", flush=True)
+        # print('\tPlotting quality_vs_length_kde...', end="", flush=True)
+        # start_time = time()
+        # self.plot_quality_vs_length_kde(d)
+        # # self.test_plot(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print("Took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
-        self.plot_quality_vs_length_kde(d)
-        # self.test_plot(d)
+        self.plot_channel_output_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting gc_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_gc_vs_time(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting gc_vs_length_hex...', end="", flush=True)
+        start_time = time()
+        self.plot_gc_vs_length_hex(d)
         end_time = time()
         interval = end_time - start_time
         print("Took %s" % self.elapsed_time(interval))
@@ -1226,7 +1251,7 @@ class NanoQC(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=(10, 6))
 
         ts_pass = list()
         ts_fail = list()
@@ -1631,8 +1656,8 @@ class NanoQC(object):
         df_fail = df.loc[df['flag'] == 'fail']
 
         # Set x-axis limits
-        min_len = min(df.ix[:, 0])
-        max_len = max(df.ix[:, 0])
+        min_len = min(df['Length (bp)'])
+        max_len = max(df['Length (bp)'])
         min_exp = np.log10(min_len)
         max_exp = np.log10(max_len)
         min_value = float(10 ** (min_exp - 0.1))
@@ -1645,8 +1670,8 @@ class NanoQC(object):
         len_logbins = np.logspace(min_exp, max_exp, 25)
 
         # Set y-axis limits
-        min_phred = min(df.ix[:, 1])
-        max_phred = max(df.ix[:, 1])
+        min_phred = min(df['Phred score'])
+        max_phred = max(df['Phred score'])
 
         # Set bin sized for histogram
         phred_bins = np.linspace(min_phred, max_phred, 15)
@@ -1654,12 +1679,11 @@ class NanoQC(object):
         # Do the Kernel Density Estimation (KDE)
         x = df_pass['Length (bp)']
         y = df_pass['Phred score']
-        xx, yy, density = self.kde2D(x, y, 1)
 
         # Create grid object
         g = sns.JointGrid(x='Length (bp)', y='Phred score', data=df_pass, space=0)
 
-        cset1 = g.ax_joint.hexbin(x, y, gridsize=50, cmap="Blues", xscale='log', alpha=0.6, mincnt=1)
+        g.ax_joint.hexbin(x, y, gridsize=50, cmap="Blues", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
         g.ax_joint.axis([min_value, max_value, min_phred, max_phred])
         g.ax_marg_x.hist(x, histtype='stepfilled', color='blue', alpha=0.6, bins=len_logbins)
         g.ax_marg_y.hist(y, histtype='stepfilled', color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
@@ -1681,7 +1705,7 @@ class NanoQC(object):
             x = df_fail['Length (bp)']
             y = df_fail['Phred score']
 
-            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1)
+            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
             g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
             g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
                              orientation="horizontal")
@@ -2090,7 +2114,233 @@ class NanoQC(object):
         fig = g.get_figure()  # Get figure from FacetGrid
         fig.savefig(self.output_folder + "/pores_output_vs_time.png")
 
-    # Should do plot(s) with the %GC, which you can't get with the summary file.
+    def plot_channel_output_all(self, d):
+        """
+        https://github.com/wdecoster/nanoplotter/blob/master/nanoplotter/spatial_heatmap.py#L69
+        https://bioinformatics.stackexchange.com/questions/745/minion-channel-ids-from-albacore/749#749
+
+        :param d: Dictionary
+        :return: png file
+        """
+
+        channel_dict = defaultdict()
+        for seq_id, seq in d.items():
+            channel_number = int(seq.channel)
+            # Pass and fail apart
+            if channel_number not in channel_dict:
+                channel_dict[channel_number] = [0, 0]
+            if seq.flag == 'pass':
+                channel_dict[channel_number][0] += 1
+            else:  # seq.flag == b'fail':
+                channel_dict[channel_number][1] += 1
+
+        # convert to Pandas dataframe
+        df = pd.DataFrame.from_dict(channel_dict, orient='index', columns=['Pass', 'Fail'])
+        df_all = pd.DataFrame()
+        df_all['All'] = df['Pass'] + df['Fail']
+        df_pass = df[['Pass']]  # The double square brakets keep the column name
+        df_fail = df[['Fail']]
+
+        # Plot
+        fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
+
+        for i, my_tuple in enumerate([(df_all, 'All', 'Greens'),
+                                      (df_pass, 'Pass', 'Blues'),
+                                      (df_fail, 'Fail', 'Reds')]):
+            my_df = my_tuple[0]
+            flag = my_tuple[1]
+            cmap = my_tuple[2]
+
+            maxval = max(my_df.index)  # maximum channel value
+            layout = self.make_layout(maxval=maxval)
+            value_cts = pd.Series(my_df[flag])
+            for entry in value_cts.keys():
+                layout.template[np.where(layout.structure == entry)] = value_cts[entry]
+            sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
+                        xticklabels="auto", yticklabels="auto",
+                        square=True,
+                        cbar_kws={"orientation": "horizontal"},
+                        cmap=cmap,
+                        linewidths=0.20,
+                        ax=axs[i])
+            axs[i].set_title("{} reads output per channel".format(flag))
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/channel_output_all.png")
+
+    def plot_gc_vs_time(self, d):
+        """
+        Quality vs time (bins of 1h). Violin plot
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        ts_pass = list()
+        ts_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == 'pass':
+                #         average_phred = round(average_phred_full, 1)
+                ts_pass.append(tuple((seq.time_string, round(seq.gc, 1))))
+            else:
+                ts_fail.append(tuple((seq.time_string, round(seq.gc, 1))))
+
+        ts_zero_pass = None
+        ts_zero_fail = None
+        if ts_pass:
+            ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+
+        if ts_fail:
+            ts_zero_fail = min(ts_fail, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
+
+        if ts_pass and ts_fail:
+            ts_zero = min(ts_zero_pass, ts_zero_fail)
+        elif ts_pass:
+            ts_zero = ts_zero_pass
+        else:  # elif ts_fail:
+            ts_zero = ts_zero_fail
+
+        ts_pass3 = list()
+        ts_fail3 = list()
+        if ts_pass:
+            ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
+            ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+            ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
+            ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
+
+            # Convert to dataframe
+            df_pass = pd.DataFrame(list(ts_pass3), columns=['Sequencing time interval (h)', '%GC'])
+            df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+
+        if ts_fail:
+            ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
+            ts_fail1.sort(key=lambda x: x[0])
+            ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
+            ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
+
+            df_fail = pd.DataFrame(list(ts_fail3), columns=['Sequencing time interval (h)', '%GC'])
+            df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        # Account if there is no fail data or no pass data
+        if ts_fail3 and ts_pass3:
+            frames = [df_pass, df_fail]
+            data = pd.concat(frames)  # Merge dataframes
+        elif ts_pass3:
+            data = df_pass
+        else:  # elif ts_fail3:
+            data = df_fail
+
+        # Account if there is no fail data or no pass data
+        if ts_fail3 and ts_pass3:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='%GC', data=data, hue='Flag',
+                               split=True, inner=None)
+            g.figure.suptitle('Sequence quality over time')
+        elif ts_pass3:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='%GC', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (pass only)')
+        else:  # elif ts_fail3:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='%GC', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (fail only)')
+
+        # Major ticks every 4 hours
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+        # https://matplotlib.org/2.0.2/examples/ticks_and_spines/tick-locators.html
+        def my_formater(val, pos):
+            val_str = '{}-{}'.format(int(val), int(val + 1))
+            return val_str
+
+        ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+        ax.xaxis.set_major_locator(MultipleLocator(4))
+
+        if ts_fail:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/gc_vs_time.png")
+
+    def plot_gc_vs_length_hex(self, d):
+        """
+        seaborn jointplot (length vs quality)
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        sns.set(style="ticks")
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [seq.length, seq.gc, seq.flag]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length (bp)', '%GC', 'flag'])
+        df_pass = df.loc[df['flag'] == 'pass']
+        df_fail = df.loc[df['flag'] == 'fail']
+
+        # Set x-axis limits
+        min_len = min(df['Length (bp)'])
+        max_len = max(df['Length (bp)'])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        min_value = float(10 ** (min_exp - 0.1))
+        max_value = float(10 ** (max_exp + 0.1))
+
+        # Set bin sized for histogram
+        len_logbins = np.logspace(min_exp, max_exp, 25)
+
+        # Set y-axis limits
+        min_phred = min(df['%GC'])
+        max_phred = max(df['%GC'])
+
+        # Set bin sized for histogram
+        phred_bins = np.linspace(min_phred, max_phred, 15)
+
+        # Create grid object
+        g = sns.JointGrid(x='Length (bp)', y='%GC', data=df, space=0)
+
+        # Plot Fail fist
+        if not df_fail.empty:
+            x = df_fail['Length (bp)']
+            y = df_fail['%GC']
+            g.x = df_fail['Length (bp)']
+            g.y = df_fail['%GC']
+
+            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
+            g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
+            g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
+                             orientation="horizontal")
+
+        # Plot Pass second
+        x = df_pass['Length (bp)']
+        y = df_pass['%GC']
+        g.x = df_pass['Length (bp)']
+        g.y = df_pass['%GC']
+
+        g.ax_joint.hexbin(x, y, gridsize=50, cmap="Blues", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
+        g.ax_joint.axis([min_value, max_value, min_phred, max_phred])
+        g.ax_marg_x.hist(x, histtype='stepfilled', color='blue', alpha=0.6, bins=len_logbins)
+        g.ax_marg_y.hist(y, histtype='stepfilled', color='blue', alpha=0.6, bins=phred_bins, orientation="horizontal")
+
+        # Set main plot x axis scale to log
+        g.ax_joint.set_xscale('log')
+        g.ax_marg_x.set_xscale('log')
+        g.ax_joint.set_xlim((min_value, max_value))
+
+        # Add legend to the joint plot area
+        # https://matplotlib.org/tutorials/intermediate/legend_guide.html
+        blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
+        red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
+        if not df_fail.empty:
+            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+        else:
+            g.ax_joint.legend(handles=[blue_patch], loc='best')
+
+        # Set figure size
+        g.fig.set_figwidth(8)
+        g.fig.set_figheight(4)
+
+        # Save figure to file
+        g.savefig(self.output_folder + "/gc_vs_length_hex.png")
 
     # Summary plots
 
@@ -2139,68 +2389,68 @@ class NanoQC(object):
     def make_summary_plots(self, d):
         print("\nMaking plots:")
 
-        # print('\tPlotting total_reads_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_total_reads_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting total_bp_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_total_bp_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_reads_per_sample_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_bp_per_sample_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting length_distribution...', end="", flush=True)
-        # start_time = time()
-        # self.plot_length_distribution_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting phred_score_distribution...', end="", flush=True)
-        # start_time = time()
-        # self.plot_phred_score_distribution_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting quality_vs_length_hex...', end="", flush=True)
-        # start_time = time()
-        # self.plot_quality_vs_length_hex_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
-        # start_time = time()
-        # self.plot_reads_vs_bp_per_sample_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting pores_output_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_pores_output_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_reads_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_bp_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_bp_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_per_sample_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_bp_per_sample_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting length_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_length_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting phred_score_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_phred_score_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_length_hex...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_length_hex_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_vs_bp_per_sample_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting pores_output_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_output_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         # print('\tPlotting channel_output_total...', end="", flush=True)
         # start_time = time()
@@ -2209,9 +2459,23 @@ class NanoQC(object):
         # interval = end_time - start_time
         # print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting channel_output_pass_fail...', end="", flush=True)
+        # print('\tPlotting channel_output_pass_fail...', end="", flush=True)
+        # start_time = time()
+        # self.plot_channel_output_pass_fail(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
-        self.plot_channel_output_pass_fail(d)
+        self.plot_channel_output_all_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_time_summary(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -2689,7 +2953,7 @@ class NanoQC(object):
             x = df_fail['Length (bp)']
             y = df_fail['Phred score']
 
-            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1,edgecolor='none')
+            g.ax_joint.hexbin(x, y, gridsize=50, cmap="Reds", xscale='log', alpha=0.6, mincnt=1, edgecolor='none')
             g.ax_marg_x.hist(x, histtype='stepfilled', color='red', alpha=0.6, bins=len_logbins)
             g.ax_marg_y.hist(y, histtype='stepfilled', color='red', alpha=0.6, bins=phred_bins,
                              orientation="horizontal")
@@ -2922,7 +3186,7 @@ class NanoQC(object):
         df_fail = df[['Fail']]
 
         # Plot
-        fig, axs = plt.subplots(nrows=2, figsize=(4, 8))
+        fig, axs = plt.subplots(nrows=2, figsize=(6, 8))
 
         for i, my_tuple in enumerate([(df_pass, 'Pass', 'Blues'), (df_fail, 'Fail', 'Reds')]):
             my_df = my_tuple[0]
@@ -2943,6 +3207,130 @@ class NanoQC(object):
             axs[i].set_title("{} reads output per channel".format(flag))
         plt.tight_layout()  # Get rid of extra margins around the plot
         fig.savefig(self.output_folder + "/channel_output_pass_fail.png")
+
+    def plot_channel_output_all_summary(self, d):
+        """
+        https://github.com/wdecoster/nanoplotter/blob/master/nanoplotter/spatial_heatmap.py#L69
+        https://bioinformatics.stackexchange.com/questions/745/minion-channel-ids-from-albacore/749#749
+
+        :param d: Dictionary
+        :return: png file
+        """
+
+        channel_dict = defaultdict()
+        for seq_id, seq in d.items():
+            length = int(seq.length)
+            if length == 0:
+                continue
+            channel_number = int(seq.channel)
+            # Pass and fail apart
+            if channel_number not in channel_dict:
+                channel_dict[channel_number] = [0, 0]
+            if seq.flag == b'True':
+                channel_dict[channel_number][0] += 1
+            else:  # seq.flag == b'False':
+                channel_dict[channel_number][1] += 1
+
+        # convert to Pandas dataframe
+        df = pd.DataFrame.from_dict(channel_dict, orient='index', columns=['Pass', 'Fail'])
+        df_all = pd.DataFrame()
+        df_all['All'] = df['Pass'] + df['Fail']
+        df_pass = df[['Pass']]  # The double square brakets keep the column name
+        df_fail = df[['Fail']]
+
+        # Plot
+        fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
+
+        for i, my_tuple in enumerate([(df_all, 'All', 'Greens'), (df_pass, 'Pass', 'Blues'), (df_fail, 'Fail', 'Reds')]):
+            my_df = my_tuple[0]
+            flag = my_tuple[1]
+            cmap = my_tuple[2]
+
+            maxval = max(my_df.index)  # maximum channel value
+            layout = self.make_layout(maxval=maxval)
+            value_cts = pd.Series(my_df[flag])
+            for entry in value_cts.keys():
+                layout.template[np.where(layout.structure == entry)] = value_cts[entry]
+            sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
+                        xticklabels="auto", yticklabels="auto",
+                        square=True,
+                        cbar_kws={"orientation": "horizontal"},
+                        cmap=cmap,
+                        linewidths=0.20,
+                        ax=axs[i])
+            axs[i].set_title("{} reads output per channel".format(flag))
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/channel_output_all.png")
+
+    def plot_quality_vs_time_summary(self, d):
+        """
+        Quality vs time (bins of 1h). Violin plot
+        :param d: Dictionary
+        :return: png file
+        name, length, flag, average_phred, gc, time_string
+        """
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        ts_pass = list()
+        ts_fail = list()
+        for seq_id, seq in d.items():
+            if seq.flag == b'True':
+                ts_pass.append(tuple((seq.time_stamp, round(float(seq.average_phred), 1))))
+            else:
+                ts_fail.append(tuple((seq.time_stamp, round(float(seq.average_phred), 1))))
+
+        if ts_pass:
+            ts_pass[:] = [tuple(((float(x) / 3600), y)) for x, y in ts_pass]  # Convert to hours (float)
+            ts_pass.sort(key=lambda x: x[0])  # Sort according to first element in tuple
+            ts_pass[:] = [tuple((int(np.round(x)), y)) for x, y in ts_pass]  # Round hours
+
+            df_pass = pd.DataFrame(list(ts_pass), columns=['Sequencing time interval (h)', 'Phred score'])  # Convert to dataframe
+            df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
+
+        if ts_fail:
+            ts_fail[:] = [tuple(((float(x) / 3600), y)) for x, y in ts_fail]
+            ts_fail.sort(key=lambda x: x[0])
+            ts_fail[:] = [tuple((int(np.round(x)), y)) for x, y in ts_fail]
+
+            df_fail = pd.DataFrame(list(ts_fail), columns=['Sequencing time interval (h)', 'Phred score'])
+            df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
+
+        # Account if there is no fail data or no pass data
+        if ts_fail and ts_pass:
+            frames = [df_pass, df_fail]
+            data = pd.concat(frames)  # Merge dataframes
+        elif ts_pass:
+            data = df_pass
+        else:  # elif ts_fail3:
+            data = df_fail
+
+        # Account if there is no fail data or no pass data
+        if ts_fail and ts_pass:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, hue='Flag', split=True, inner=None)
+            g.figure.suptitle('Sequence quality over time')
+        elif ts_pass:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (pass only)')
+        else:  # elif ts_fail:
+            g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
+            g.figure.suptitle('Sequence quality over time (fail only)')
+
+        # Major ticks every 4 hours
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+        # https://matplotlib.org/2.0.2/examples/ticks_and_spines/tick-locators.html
+        def my_formater(val, pos):
+            val_str = '{}-{}'.format(int(val), int(val + 1))
+            return val_str
+
+        ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
+        ax.xaxis.set_major_locator(MultipleLocator(4))
+
+        if ts_fail:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/quality_vs_time.png")
 
 
 if __name__ == '__main__':
