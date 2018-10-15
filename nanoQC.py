@@ -2499,61 +2499,61 @@ class NanoQC(object):
     def make_summary_plots(self, d):
         print("\nMaking plots:")
 
-        # print('\tPlotting total_reads_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_total_reads_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting total_bp_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_total_bp_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_reads_per_sample_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_bp_per_sample_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting length_distribution...', end="", flush=True)
-        # start_time = time()
-        # self.plot_length_distribution_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting phred_score_distribution...', end="", flush=True)
-        # start_time = time()
-        # self.plot_phred_score_distribution_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting quality_vs_length_hex...', end="", flush=True)
-        # start_time = time()
-        # self.plot_quality_vs_length_hex_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
-        # start_time = time()
-        # self.plot_reads_vs_bp_per_sample_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting total_reads_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_reads_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting total_bp_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_total_bp_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_per_sample_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_bp_per_sample_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting length_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_length_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting phred_score_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_phred_score_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_length_hex...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_length_hex_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_vs_bp_per_sample_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting pores_output_vs_time_all...', end="", flush=True)
         start_time = time()
@@ -2562,40 +2562,40 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        # print('\tPlotting pores_output_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_pores_output_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting pores_output_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_output_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
-        # print('\tPlotting channel_output_total...', end="", flush=True)
-        # start_time = time()
-        # self.plot_channel_output_total(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting channel_output_total...', end="", flush=True)
+        start_time = time()
+        self.plot_channel_output_total(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
-        # print('\tPlotting channel_output_pass_fail...', end="", flush=True)
-        # start_time = time()
-        # self.plot_channel_output_pass_fail(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting channel_output_pass_fail...', end="", flush=True)
+        start_time = time()
+        self.plot_channel_output_pass_fail(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
-        # print('\tPlotting channel_output_all...', end="", flush=True)
-        # start_time = time()
-        # self.plot_channel_output_all_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
-        #
-        # print('\tPlotting quality_vs_time...', end="", flush=True)
-        # start_time = time()
-        # self.plot_quality_vs_time_summary(d)
-        # end_time = time()
-        # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        print('\tPlotting channel_output_all...', end="", flush=True)
+        start_time = time()
+        self.plot_channel_output_all_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting quality_vs_time...', end="", flush=True)
+        start_time = time()
+        self.plot_quality_vs_time_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
     def plot_total_reads_vs_time_summary(self, d):
         """
