@@ -23,21 +23,20 @@ import subprocess
 import gzip
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.patches as mpatches
-import datetime as dt
-from math import sqrt
-from itertools import count, islice
+from math import sqrt, log
+from itertools import islice
 
 
 __author__ = 'duceppemo'
-__version__ = '0.3.3'
+__version__ = '0.3.4'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
 # TODO -> Add a function to rename the samples with a conversion table (two-column tab-separated file)
 # TODO -> make proper log file
+# TODO -> Add stats (# of reads, # of pass, # of fail, top 10 channels, etc.)
 # TODO -> check for dependencies
 # TODO -> unit testing
-# TODO -> add option to use the "sequencing_summary.txt" file as input instead of the fastq files
 
 
 class FastqObjects(object):
@@ -280,8 +279,11 @@ class NanoQC(object):
         phred_list = list()
         for letter in qual:
             # phred_list.append(ord(letter))
-            phred_list.append(letter)
-        average_phred = sum(phred_list) / len(phred_list) - 33
+            phred_list.append(letter - 33)
+
+        # https://gigabaseorgigabyte.wordpress.com/2017/06/26/averaging-basecall-quality-scores-the-right-way/
+        # average_phred = sum(phred_list) / len(phred_list)
+        average_phred = -10 * log(sum([10 ** (q / -10) for q in phred_list]) / len(phred_list), 10)
 
         # GC percentage
         g_count = float(seq.count(b'G'))
@@ -1742,9 +1744,9 @@ class NanoQC(object):
         blue_patch = mpatches.Patch(color='blue', alpha=0.6, label='Pass')
         red_patch = mpatches.Patch(color='red', alpha=0.6, label='Fail')
         if not df_fail.empty:
-            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='best')
+            g.ax_joint.legend(handles=[blue_patch, red_patch], loc='upper left')
         else:
-            g.ax_joint.legend(handles=[blue_patch], loc='best')
+            g.ax_joint.legend(handles=[blue_patch], loc='upper left')
 
         # Add legend to top margin_plot area
         # g.ax_marg_x.legend(('pass', 'fail'), loc='upper right')
@@ -2536,10 +2538,6 @@ class NanoQC(object):
         plt.tight_layout()  # Get rid of extra margins around the plot
         fig.savefig(self.output_folder + "/pores_gc_output_vs_time_all.png")
 
-    # @staticmethod
-    # def is_prime(n):
-    #     return n > 1 and all(n % i for i in islice(count(2), int(sqrt(n) - 1)))
-
     @staticmethod
     def find_best_matrix(n_sample):
         """
@@ -2593,7 +2591,6 @@ class NanoQC(object):
             for j in range(width):
                 if sample_index >= len(sample_list):
                     ax[i, j].axis('off')  # don't draw the plot is no more sample for the 'too big' matrix
-                    # break
                 else:
                     sample_name = sample_list[sample_index]
                     tmp_df = df[df['name'].str.match(sample_name)]
@@ -2615,6 +2612,7 @@ class NanoQC(object):
                     # Add sample name to graph
                     ax[i, j].set_title(sample_name)
                     ax[i, j].set_xlabel(None)
+                    ax[i, j].set_ylabel(None)
 
                 # Move to next sample
                 sample_index += 1
@@ -2634,7 +2632,7 @@ class NanoQC(object):
         plt.figlegend(by_label.values(), by_label.keys())
 
         plt.tight_layout(rect=[0.02, 0.02, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
-        fig.savefig(self.output_folder + "/pores_gc_output_vs_time_all.png")
+        fig.savefig(self.output_folder + "/pores_gc_output_vs_time_per_sample.png")
 
     # Summary plots
 
@@ -2682,6 +2680,13 @@ class NanoQC(object):
 
     def make_summary_plots(self, d):
         print("\nMaking plots:")
+
+        print('\tPlotting bp_per_sample_pie...', end="", flush=True)
+        start_time = time()
+        self.plot_bp_per_sample_pie_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting total_reads_vs_time...', end="", flush=True)
         start_time = time()
@@ -2935,6 +2940,58 @@ class NanoQC(object):
         plt.tight_layout()
         # Save figure to file
         fig.savefig(self.output_folder + "/bp_per_sample_vs_time.png")
+
+    # @staticmethod
+    # def get_percentage(pct, allvals):
+    #     absolute = int(pct / 100. * np.sum(allvals))
+    #     return "{:.1f}%\n({:d})".format(pct, absolute)
+
+    @staticmethod
+    def get_percentage(pct, allvals):
+        absolute = int(pct / 100. * np.sum(allvals))
+        return "({:.1f}%, {:d})".format(pct, absolute)
+
+    def plot_bp_per_sample_pie_summary(self, d):
+        """
+        Read length per sample vs time
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, axs = plt.subplots(nrows=3, ncols=1, figsize=(10, 14))
+
+        # Fetch required information
+        my_sample_dict = defaultdict(list)
+        for seq_id, seq in d.items():
+            my_sample_dict[seq_id] = [seq.name.decode('ascii'),
+                                      int(seq.length.decode('ascii')),
+                                      seq.flag.decode('ascii')]
+
+        df = pd.DataFrame.from_dict(my_sample_dict, orient='index', columns=['name', 'length', 'flag'])
+        df_all = df.groupby(['name']).sum()
+        df_pass = df[df['flag'] == 'True'].groupby(['name']).sum()
+        df_fail = df[df['flag'] == 'False'].groupby(['name']).sum()
+
+        # Make the plots
+        titles = ['All', 'Pass', 'Fail']
+        for i, my_df in enumerate([df_all, df_pass, df_fail]):
+            my_df = my_df.sort_values(['length'], ascending=False)  # sort dataframe for better looking pie chart
+            data = list(my_df['length'])
+            data_sum = sum(data)
+            labels = list(my_df.index)
+            # label2 = [NanoQC.get_percentage(pct, data) for pct in data]
+            for j, l in enumerate(labels):
+                labels[j] = "{:s} ({:,} bp, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+
+            axs[i].pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
+            axs[i].set_title(titles[i])
+
+        # Add label to axes
+        plt.subplots_adjust(hspace=0.5)
+        fig.suptitle('Base pair ditribution among samples', fontsize=18)
+        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/bp_per_sample_pie.png")
 
     def plot_total_bp_vs_time_summary(self, d):
         """
