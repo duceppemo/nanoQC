@@ -16,7 +16,6 @@ from dateutil.parser import parse
 import logging
 from collections import defaultdict, OrderedDict
 from itertools import zip_longest
-from itertools import islice
 from functools import partial
 from contextlib import closing
 from math import ceil
@@ -24,10 +23,13 @@ import subprocess
 import gzip
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.patches as mpatches
+import datetime as dt
+from math import sqrt
+from itertools import count, islice
 
 
 __author__ = 'duceppemo'
-__version__ = '0.3.2'
+__version__ = '0.3.3'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -869,12 +871,14 @@ class NanoQC(object):
         # pool.terminate()  # Needed to do proper garbage collection?
 
         # Update self.sample_dict with results from every chunk
+        read_counter = 0
         for dictionary in results:
+            read_counter += len(dictionary.keys())
             d.update(dictionary)  # Do the merge
 
         end_time = time()
         interval = end_time - start_time
-        print(" took {}".format(self.elapsed_time(interval)))
+        print(" took %s for %d reads" % (self.elapsed_time(interval), read_counter))
 
     # Fastq plots
 
@@ -901,7 +905,7 @@ class NanoQC(object):
         self.plot_reads_vs_bp_per_sample(d)
         end_time = time()
         interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
         start_time = time()
@@ -929,21 +933,21 @@ class NanoQC(object):
         self.plot_length_distribution(d)
         end_time = time()
         interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        print(" took %s" % self.elapsed_time(interval))
 
         # print('\tPlotting pores_output_vs_time_total...', end="", flush=True)
         # start_time = time()
         # self.plot_pores_output_vs_time_total(d)
         # end_time = time()
         # interval = end_time - start_time
-        # print("Took %s" % self.elapsed_time(interval))
+        # print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting pores_output_vs_time_all...', end="", flush=True)
         start_time = time()
         self.plot_pores_output_vs_time_all(d)
         end_time = time()
         interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting quality_vs_time...', end="", flush=True)
         start_time = time()
@@ -957,14 +961,14 @@ class NanoQC(object):
         # self.plot_quality_vs_length_scatter(d)
         # end_time = time()
         # interval = end_time - start_time
-        # print("Took %s" % self.elapsed_time(interval))
+        # print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length_hex...', end="", flush=True)
         start_time = time()
         self.plot_quality_vs_length_hex(d)
         end_time = time()
         interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        print(" took %s" % self.elapsed_time(interval))
 
         # print('\tPlotting quality_vs_length_kde...', end="", flush=True)
         # start_time = time()
@@ -972,7 +976,7 @@ class NanoQC(object):
         # # self.test_plot(d)
         # end_time = time()
         # interval = end_time - start_time
-        # print("Took %s" % self.elapsed_time(interval))
+        # print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
@@ -993,7 +997,21 @@ class NanoQC(object):
         self.plot_gc_vs_length_hex(d)
         end_time = time()
         interval = end_time - start_time
-        print("Took %s" % self.elapsed_time(interval))
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting pores_gc_output_vs_time_all...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_gc_output_vs_time_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_gc_output_vs_time_per_sample(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
     def plot_total_reads_vs_time(self, d):
         """
@@ -2452,6 +2470,172 @@ class NanoQC(object):
         # Save figure to file
         g.savefig(self.output_folder + "/gc_vs_length_hex.png")
 
+    def plot_pores_gc_output_vs_time_all(self, d):
+
+        fig, ax = plt.subplots()
+
+        time_list_all = list()
+        time_list_pass = list()
+        time_list_fail = list()
+
+        for seq_id, seq in d.items():
+            time_string = seq.time_string
+            time_list_all.append(tuple((time_string, seq.gc)))
+            if seq.flag == 'pass':
+                time_list_pass.append(tuple((time_string, seq.gc)))
+            else:
+                time_list_fail.append(tuple((time_string, seq.gc)))
+
+        time_zero = min(time_list_all, key=lambda x: x[0])[0]  # looking for min of 1st elements of list of tuples
+
+        # Compute x_bins
+        time_list_all.sort(key=lambda x: x[0])  # order list
+        time_list_all[:] = [tuple((x - time_zero, y)) for x, y in time_list_all]  # Subtract t_zero
+        time_list_all[:] = [tuple((x.days * 24 + x.seconds / 3600, y)) for x, y in time_list_all]  # Convert to minutes
+        # time_list_all[:] = [tuple((int(np.round(x)), y)) for x, y in time_list_all]  # Round minutes
+        x = [x for x, y in time_list_all]
+        y = [y for x, y in time_list_all]
+
+        # How many bins to plot data
+        nbins = int(max(x)) + 1
+        # Create the bin boundaries
+        x_bins = np.linspace(min(x), max(x), nbins)
+
+        # Plot pass - Assume always pass reads present
+        time_list_pass.sort(key=lambda x: x[0])  # order list
+        time_list_pass[:] = [tuple((x - time_zero, y)) for x, y in time_list_pass]  # Subtract t_zero
+        time_list_pass[:] = [tuple((x.days * 24 + x.seconds / 3600, y)) for x, y in time_list_pass]  # Convert to min
+        x = [x for x, y in time_list_pass]
+        y = [y for x, y in time_list_pass]
+
+        sns.regplot(x=x, y=y, x_bins=x_bins, fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                    label='Pass', color='blue')
+
+        # sns.scatterplot(x=x, y=y, x_bins=x_bins, alpha=0.8, cmap='Blues')
+
+        if time_list_fail:
+            time_list_fail.sort(key=lambda x: x[0])  # order list
+            time_list_fail[:] = [tuple((x - time_zero, y)) for x, y in time_list_fail]  # Subtract t_zero
+            time_list_fail[:] = [tuple((x.days * 24 + x.seconds / 3660, y)) for x, y in time_list_fail]
+            x = [x for x, y in time_list_fail]
+            y = [y for x, y in time_list_fail]
+
+            # Plot the data
+            sns.regplot(x=x, y=y, x_bins=x_bins, fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                        label='Fail', color='red')
+
+        # Set major ticks every 4 h
+        ax.xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
+
+        # Add label to axes
+        plt.title('%GC over time')
+        plt.ylabel('%GC')
+        plt.xlabel('Sequencing time (hours)')
+        plt.legend()
+
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/pores_gc_output_vs_time_all.png")
+
+    # @staticmethod
+    # def is_prime(n):
+    #     return n > 1 and all(n % i for i in islice(count(2), int(sqrt(n) - 1)))
+
+    @staticmethod
+    def find_best_matrix(n_sample):
+        """
+        Trying to alway get higher than wider
+        :param n_sample: Number of samples to use to create the matrix
+        :return:
+        """
+        width = int(sqrt(n_sample))
+        is_even = False
+        if n_sample % 2 == 0:
+            is_even = True
+
+        if is_even:
+            while True:
+                if n_sample % width == 0:
+                    break
+                else:
+                    width += 1
+            height = int(n_sample / width)
+        else:
+            height = ceil(n_sample / width)
+
+        return width, height
+
+    def plot_pores_gc_output_vs_time_per_sample(self, d):
+        my_dict = defaultdict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = (seq.time_string, seq.gc, seq.flag, seq.name)
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', '%GC', 'flag', 'name'])
+
+        # convert datatime to elapsed hours
+        time_zero = min(df['time_string'])  # looking for min of 1st elements of list of tuples
+        df['time_string'] = df['time_string'] - time_zero
+        df['time_string'] = df['time_string'].dt.total_seconds() / 3600
+
+        # Compute x_bins
+        nbins = int(max(df['time_string'])) + 1  # How many bins to plot data
+        x_bins = np.linspace(min(df['time_string']), max(df['time_string']), nbins)  # Create the bin boundaries
+
+        sample_list = sorted((df['name'].unique()))
+        n_sample = len(sample_list)
+        width, height = NanoQC.find_best_matrix(n_sample)
+        # print(n_sample, width, height)  # debug
+
+        # Make grid for all samples
+        # https://jakevdp.github.io/PythonDataScienceHandbook/04.08-multiple-subplots.html
+        fig, ax = plt.subplots(height, width, sharex='col', sharey='row', figsize=(height*5, width*5))
+        sample_index = 0
+        for i in range(height):
+            for j in range(width):
+                if sample_index >= len(sample_list):
+                    ax[i, j].axis('off')  # don't draw the plot is no more sample for the 'too big' matrix
+                    # break
+                else:
+                    sample_name = sample_list[sample_index]
+                    tmp_df = df[df['name'].str.match(sample_name)]
+                    # Pass
+                    pass_df = tmp_df[tmp_df['flag'].str.match('pass')]
+                    sns.regplot(x=pass_df['time_string'], y=pass_df['%GC'], x_bins=x_bins, ax=ax[i, j],
+                                fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                                label='Pass', color='blue')  # capsize=4, capthick=1
+                    # Fail
+                    fail_df = tmp_df[tmp_df['flag'].str.match('fail')]
+                    if not fail_df.empty:
+                        sns.regplot(x=fail_df['time_string'], y=fail_df['%GC'], x_bins=x_bins, ax=ax[i, j],
+                                    fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                                    label='Fail', color='red')
+
+                    # Set major ticks every 4 h
+                    ax[i, j].xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
+
+                    # Add sample name to graph
+                    ax[i, j].set_title(sample_name)
+                    ax[i, j].set_xlabel(None)
+
+                # Move to next sample
+                sample_index += 1
+
+        # Add label to axes
+        fig.suptitle('%GC over time per sample', fontsize=24)
+
+        # Set common x and y labels
+        fig.text(0.5, 0.01, 'Sequencing time (hours)', horizontalalignment='center', verticalalignment='center')
+        fig.text(0.01, 0.5, '%GC', horizontalalignment='center', verticalalignment='center',
+                 rotation='vertical')
+
+        # Create legend without duplicates
+        # https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = OrderedDict(zip(labels, handles))
+        plt.figlegend(by_label.values(), by_label.keys())
+
+        plt.tight_layout(rect=[0.02, 0.02, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/pores_gc_output_vs_time_all.png")
+
     # Summary plots
 
     def parse_summary(self, d):
@@ -2494,7 +2678,7 @@ class NanoQC(object):
         # Print read stats
         end_time = time()
         interval = end_time - start_time
-        print("took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+        print(" took %s for %d reads" % (self.elapsed_time(interval), read_counter))
 
     def make_summary_plots(self, d):
         print("\nMaking plots:")
@@ -2562,26 +2746,26 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting pores_output_vs_time...', end="", flush=True)
-        start_time = time()
-        self.plot_pores_output_vs_time_summary(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        # print('\tPlotting pores_output_vs_time...', end="", flush=True)
+        # start_time = time()
+        # self.plot_pores_output_vs_time_summary(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting channel_output_total...', end="", flush=True)
-        start_time = time()
-        self.plot_channel_output_total(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting channel_output_pass_fail...', end="", flush=True)
-        start_time = time()
-        self.plot_channel_output_pass_fail(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        # print('\tPlotting channel_output_total...', end="", flush=True)
+        # start_time = time()
+        # self.plot_channel_output_total(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
+        #
+        # print('\tPlotting channel_output_pass_fail...', end="", flush=True)
+        # start_time = time()
+        # self.plot_channel_output_pass_fail(d)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
@@ -3222,37 +3406,30 @@ class NanoQC(object):
         nbins = max(time_list_all) / 15 if max(time_list_all) % 15 == 0 else int(max(time_list_all) / 15) + 1
         # Create the bin boundaries
         x_bins = np.linspace(min(time_list_all), max(time_list_all), nbins)  # every 15 min
-        # Generate counts for each bin
-        hist, edges = np.histogram(time_list_all, bins=x_bins, density=False)
-        # Plot the data
-        g = sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0,
-                        cmap='Greens')  # , marker='o'
 
         # If not fail, just draw the pass. Else, draw total, fail and pass
         if time_list_fail:  # fail reads might be missing if plotting filtered reads for example.
-            # Plot fail
-            time_list_fail[:] = [float(x) / 60 for x in time_list_fail]
-            time_list_fail[:] = [int(np.round(x)) for x in time_list_fail]
-            # nbins = max(time_list_fail) / 15 if max(time_list_fail) % 15 == 0 else int(max(time_list_fail) / 15) + 1
-            # x_bins = np.linspace(min(time_list_fail), max(time_list_fail), nbins)
-            hist, edges = np.histogram(time_list_fail, bins=x_bins, density=False)
-            sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0,
-                            cmap='Reds')  # , marker='x'
-
             # Plot pass - Assume always pass reads present
             time_list_pass[:] = [float(x) / 60 for x in time_list_pass]
             time_list_pass[:] = [int(np.round(x)) for x in time_list_pass]
-            # nbins = max(time_list_pass) / 15 if max(time_list_pass) % 15 == 0 else int(max(time_list_pass) / 15) + 1
-            # x_bins = np.linspace(min(time_list_pass), max(time_list_pass), nbins)
             hist, edges = np.histogram(time_list_pass, bins=x_bins, density=False)
-            sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0,
-                                cmap='Blues')  # , marker='^'
+            sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0, cmap='Blues')
+
+            # Plot fail
+            time_list_fail[:] = [float(x) / 60 for x in time_list_fail]
+            time_list_fail[:] = [int(np.round(x)) for x in time_list_fail]
+            hist, edges = np.histogram(time_list_fail, bins=x_bins, density=False)
+            sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0, cmap='Reds')
+
+        # Plot all
+        hist, edges = np.histogram(time_list_all, bins=x_bins, density=False)
+        sns.scatterplot(data=hist, x_bins=edges, size=3, alpha=0.5, linewidth=0, cmap='Greens')
 
         # Adjust format of numbers for y axis: "1000000" -> "1,000,000"
-        g.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
 
         # Change x axis labels chunk-of-15-min to hours
-        def numfmt(m, pos):  # your custom formatter function: divide by 100.0
+        def numfmt(m, pos):
             h = '{}'.format(m / 4)
             return h
         ax.xaxis.set_major_formatter(FuncFormatter(numfmt))
@@ -3269,19 +3446,19 @@ class NanoQC(object):
         # Add legend to the plot area
         # https://stackoverflow.com/questions/47391702/matplotlib-making-a-colored-markers-legend-from-scratch
 
-        green_circle = mlines.Line2D([], [], color='green', alpha=0.6, label='All', marker='o',
-                                     markersize=5, linestyle='None')
-        blue_triangle = mlines.Line2D([], [], color='blue', alpha=0.6, label='Pass', marker='o',
-                                      markersize=5, linestyle='None')
-        red_x = mlines.Line2D([], [], color='red', alpha=0.6, label='Fail', marker='o',
-                              markersize=5, linestyle='None')
+        all_marker = mlines.Line2D([], [], color='green', alpha=0.6, label='All', marker='o',
+                                   markersize=5, linestyle='None')
+        pass_marker = mlines.Line2D([], [], color='blue', alpha=0.6, label='Pass', marker='o',
+                                    markersize=5, linestyle='None')
+        fail_marker = mlines.Line2D([], [], color='red', alpha=0.6, label='Fail', marker='o',
+                                    markersize=5, linestyle='None')
 
         if time_list_fail:
-            ax.legend(handles=[green_circle, blue_triangle, red_x], loc='upper right')
+            ax.legend(handles=[all_marker, pass_marker, fail_marker], loc='upper right')
         else:
             green_circle = mlines.Line2D([], [], color='green', alpha=0.6, label='Pass', marker='o',
                                          markersize=5, linestyle='None')
-            ax.legend(handles=[green_circle], loc='upper right')
+            ax.legend(handles=[all_marker], loc='upper right')
 
         # Add label to axes
         plt.title('Pores output over time')
@@ -3289,7 +3466,7 @@ class NanoQC(object):
         plt.xlabel('Sequencing time (hours)')
 
         plt.tight_layout()  # Get rid of extra margins around the plot
-        fig = g.get_figure()  # Get figure from FacetGrid
+        # fig = g.get_figure()  # Get figure from FacetGrid
         fig.savefig(self.output_folder + "/pores_output_vs_time_all.png")
 
     def make_layout(self, maxval):
