@@ -888,6 +888,34 @@ class NanoQC(object):
 
         print("\nMaking plots:")
 
+        print('\tPlotting pores_qual_output_vs_time_all...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_qual_output_vs_time_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting pores_length_output_vs_time_all...', end="", flush=True)
+        start_time = time()
+        self.plot_pores_length_output_vs_time_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting reads_per_sample_pie...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_per_sample_pie(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting channel_output_all...', end="", flush=True)
+        start_time = time()
+        self.plot_channel_output_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
         print('\tPlotting total_reads_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_total_reads_vs_time(d)
@@ -979,13 +1007,6 @@ class NanoQC(object):
         # end_time = time()
         # interval = end_time - start_time
         # print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting channel_output_all...', end="", flush=True)
-        start_time = time()
-        self.plot_channel_output_all(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting gc_vs_time...', end="", flush=True)
         start_time = time()
@@ -1136,6 +1157,60 @@ class NanoQC(object):
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()  #
         fig.savefig(self.output_folder + "/reads_per_sample_vs_time.png")
+
+    def plot_reads_per_sample_pie(self, d):
+        """
+        Read length per sample vs time
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        # Fetch required information
+        my_sample_dict = defaultdict(list)
+        for seq_id, seq in d.items():
+            my_sample_dict[seq_id] = [seq.name, seq.flag]
+
+        df = pd.DataFrame.from_dict(my_sample_dict, orient='index', columns=['name', 'flag'])
+        df_all = df.groupby(['name']).count()
+        df_pass = df[df['flag'] == 'pass'].groupby(['name']).count()
+        df_fail = df[df['flag'] == 'fail'].groupby(['name']).count()
+
+        if not df_fail.empty:
+            fig, axs = plt.subplots(nrows=3, ncols=1, figsize=(10, 14))
+
+            # Make the plots
+            titles = ['All', 'Pass', 'Fail']
+            for i, my_df in enumerate([df_all, df_pass, df_fail]):
+                my_df.columns = ['count']
+                my_df = my_df.sort_values(['count'], ascending=False)  # sort dataframe for better looking pie chart
+                data = list(my_df['count'])
+                data_sum = sum(data)
+                labels = list(my_df.index)
+                for j, l in enumerate(labels):
+                    labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+
+                axs[i].pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
+                axs[i].set_title(titles[i])
+        else:
+            fig, ax = plt.subplots(figsize=(10, 4))
+
+            df_pass.columns = ['count']
+            df_pass = df_pass.sort_values(['count'], ascending=False)  # sort dataframe for better looking pie chart
+            data = list(df_pass['count'])
+            data_sum = sum(data)
+            labels = list(df_pass.index)
+            for j, l in enumerate(labels):
+                labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+
+            ax.pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
+            ax.set_title('Pass')
+
+        # Add label to axes
+        plt.subplots_adjust(hspace=1)
+        fig.suptitle('Distribution of reads among samples', fontsize=18)
+        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/reads_per_sample_pie.png")
 
     def plot_bp_per_sample_vs_time(self, d):
         """
@@ -2268,32 +2343,49 @@ class NanoQC(object):
         df = pd.DataFrame.from_dict(channel_dict, orient='index', columns=['Pass', 'Fail'])
         df_all = pd.DataFrame()
         df_all['All'] = df['Pass'] + df['Fail']
-        df_pass = df[['Pass']]  # The double square brakets keep the column name
+        df_pass = df[['Pass']]  # The double square brackets keep the column name
         df_fail = df[['Fail']]
 
         # Plot
-        fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
+        if not df_fail['Fail'].sum() == 0:
+            fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
 
-        for i, my_tuple in enumerate([(df_all, 'All', 'Greens'),
-                                      (df_pass, 'Pass', 'Blues'),
-                                      (df_fail, 'Fail', 'Reds')]):
-            my_df = my_tuple[0]
-            flag = my_tuple[1]
-            cmap = my_tuple[2]
+            for i, my_tuple in enumerate([(df_all, 'All', 'Greens'),
+                                          (df_pass, 'Pass', 'Blues'),
+                                          (df_fail, 'Fail', 'Reds')]):
+                my_df = my_tuple[0]
+                flag = my_tuple[1]
+                cmap = my_tuple[2]
 
-            maxval = max(my_df.index)  # maximum channel value
+                maxval = max(my_df.index)  # maximum channel value
+                layout = self.make_layout(maxval=maxval)
+                value_cts = pd.Series(my_df[flag])
+                for entry in value_cts.keys():
+                    layout.template[np.where(layout.structure == entry)] = value_cts[entry]
+                sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
+                            xticklabels="auto", yticklabels="auto",
+                            square=True,
+                            cbar_kws={"orientation": "horizontal"},
+                            cmap=cmap,
+                            linewidths=0.20,
+                            ax=axs[i])
+                axs[i].set_title("{} reads output per channel".format(flag))
+        else:
+            fig, ax = plt.subplots()
+
+            maxval = max(df_pass.index)  # maximum channel value
             layout = self.make_layout(maxval=maxval)
-            value_cts = pd.Series(my_df[flag])
+            value_cts = pd.Series(df_pass['Pass'])
             for entry in value_cts.keys():
                 layout.template[np.where(layout.structure == entry)] = value_cts[entry]
             sns.heatmap(data=pd.DataFrame(layout.template, index=layout.yticks, columns=layout.xticks),
                         xticklabels="auto", yticklabels="auto",
                         square=True,
                         cbar_kws={"orientation": "horizontal"},
-                        cmap=cmap,
-                        linewidths=0.20,
-                        ax=axs[i])
-            axs[i].set_title("{} reads output per channel".format(flag))
+                        cmap='Blues',
+                        linewidths=0.20)
+            ax.set_title("Pass reads output per channel")
+
         plt.tight_layout()  # Get rid of extra margins around the plot
         fig.savefig(self.output_folder + "/channel_output_all.png")
 
@@ -2538,6 +2630,94 @@ class NanoQC(object):
         plt.tight_layout()  # Get rid of extra margins around the plot
         fig.savefig(self.output_folder + "/pores_gc_output_vs_time_all.png")
 
+    def plot_pores_length_output_vs_time_all(self, d):
+        # Fetch and prepare data from dictionary
+        my_dict = defaultdict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = (seq.time_string, seq.length, seq.flag)
+
+        # convert dictionary to pandas dataframe
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', 'length', 'flag'])
+
+        # convert datatime to elapsed hours
+        time_zero = min(df['time_string'])  # looking for min of 1st elements of list of tuples
+        df['time_string'] = df['time_string'] - time_zero
+        df['time_string'] = df['time_string'].dt.total_seconds() / 3600
+
+        # Compute x_bins
+        nbins = int(max(df['time_string'])) + 1  # How many bins to plot data
+        x_bins = np.linspace(min(df['time_string']), max(df['time_string']), nbins)  # Create the bin boundaries
+
+        # Plot
+        fig, ax = plt.subplots()
+        # Pass
+        pass_df = df[df['flag'] == 'pass']
+        sns.regplot(x=pass_df['time_string'], y=pass_df['length'], x_bins=x_bins,
+                    fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                    label='Pass', color='blue')  # capsize=4, capthick=1
+        # Fail
+        fail_df = df[df['flag'] == 'fail']
+        if not fail_df.empty:
+            sns.regplot(x=fail_df['time_string'], y=fail_df['length'], x_bins=x_bins,
+                        fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                        label='Fail', color='red')
+
+        # Set major ticks every 4 h
+        ax.xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
+
+        # Add label to axes
+        plt.title('Read length over time')
+        plt.ylabel('Average reads length per 15 min.')
+        plt.xlabel('Sequencing time (hours)')
+        plt.legend()
+
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/pores_length_output_vs_time_all.png")
+
+    def plot_pores_qual_output_vs_time_all(self, d):
+        # Fetch and prepare data from dictionary
+        my_dict = defaultdict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = (seq.time_string, seq.average_phred, seq.flag)
+
+        # convert dictionary to pandas dataframe
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', 'average_phred', 'flag'])
+
+        # convert datatime to elapsed hours
+        time_zero = min(df['time_string'])  # looking for min of 1st elements of list of tuples
+        df['time_string'] = df['time_string'] - time_zero
+        df['time_string'] = df['time_string'].dt.total_seconds() / 3600
+
+        # Compute x_bins
+        nbins = int(max(df['time_string'])) + 1  # How many bins to plot data
+        x_bins = np.linspace(min(df['time_string']), max(df['time_string']), nbins)  # Create the bin boundaries
+
+        # Plot
+        fig, ax = plt.subplots()
+        # Pass
+        pass_df = df[df['flag'] == 'pass']
+        sns.regplot(x=pass_df['time_string'], y=pass_df['average_phred'], x_bins=x_bins,
+                    fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                    label='Pass', color='blue')  # capsize=4, capthick=1
+        # Fail
+        fail_df = df[df['flag'] == 'fail']
+        if not fail_df.empty:
+            sns.regplot(x=fail_df['time_string'], y=fail_df['average_phred'], x_bins=x_bins,
+                        fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                        label='Fail', color='red')
+
+        # Set major ticks every 4 h
+        ax.xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
+
+        # Add label to axes
+        plt.title('Read quality over time')
+        plt.ylabel('Average reads quality per 15 min.')
+        plt.xlabel('Sequencing time (hours)')
+        plt.legend()
+
+        plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/pores_qual_output_vs_time_all.png")
+
     @staticmethod
     def find_best_matrix(n_sample):
         """
@@ -2680,6 +2860,14 @@ class NanoQC(object):
 
     def make_summary_plots(self, d):
         print("\nMaking plots:")
+
+
+        print('\tPlotting reads_per_sample_pie...', end="", flush=True)
+        start_time = time()
+        self.plot_reads_per_sample_pie_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting bp_per_sample_pie...', end="", flush=True)
         start_time = time()
@@ -2887,6 +3075,47 @@ class NanoQC(object):
         plt.tight_layout()  #
         fig.savefig(self.output_folder + "/reads_per_sample_vs_time.png")
 
+    def plot_reads_per_sample_pie_summary(self, d):
+        """
+        Read length per sample vs time
+        :param d: Dictionary
+        :return: png file
+        # name, length, channel, events, average_phred, time_stamp, flag
+        """
+
+        fig, axs = plt.subplots(nrows=3, ncols=1, figsize=(10, 14))
+
+        # Fetch required information
+        my_sample_dict = defaultdict(list)
+        for seq_id, seq in d.items():
+            my_sample_dict[seq_id] = [seq.name.decode('ascii'),
+                                      seq.flag.decode('ascii')]
+
+        df = pd.DataFrame.from_dict(my_sample_dict, orient='index', columns=['name', 'flag'])
+        df_all = df.groupby(['name']).count()
+        df_pass = df[df['flag'] == 'True'].groupby(['name']).count()
+        df_fail = df[df['flag'] == 'False'].groupby(['name']).count()
+
+        # Make the plots
+        titles = ['All', 'Pass', 'Fail']
+        for i, my_df in enumerate([df_all, df_pass, df_fail]):
+            my_df.columns = ['count']
+            my_df = my_df.sort_values(['count'], ascending=False)  # sort dataframe for better looking pie chart
+            data = list(my_df['count'])
+            data_sum = sum(data)
+            labels = list(my_df.index)
+            for j, l in enumerate(labels):
+                labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+
+            axs[i].pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
+            axs[i].set_title(titles[i])
+
+        # Add label to axes
+        plt.subplots_adjust(hspace=1)
+        fig.suptitle('Distribution of reads among samples', fontsize=18)
+        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "suptitile" [left, bottom, right, top]
+        fig.savefig(self.output_folder + "/reads_per_sample_pie.png")
+
     def plot_bp_per_sample_vs_time_summary(self, d):
         """
         Read length per sample vs time
@@ -2941,11 +3170,6 @@ class NanoQC(object):
         # Save figure to file
         fig.savefig(self.output_folder + "/bp_per_sample_vs_time.png")
 
-    # @staticmethod
-    # def get_percentage(pct, allvals):
-    #     absolute = int(pct / 100. * np.sum(allvals))
-    #     return "{:.1f}%\n({:d})".format(pct, absolute)
-
     @staticmethod
     def get_percentage(pct, allvals):
         absolute = int(pct / 100. * np.sum(allvals))
@@ -2989,7 +3213,7 @@ class NanoQC(object):
 
         # Add label to axes
         plt.subplots_adjust(hspace=0.5)
-        fig.suptitle('Base pair ditribution among samples', fontsize=18)
+        fig.suptitle('Distribution of base pairs among samples', fontsize=18)
         plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(self.output_folder + "/bp_per_sample_pie.png")
 
