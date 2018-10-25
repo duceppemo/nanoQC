@@ -25,10 +25,10 @@ from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.patches as mpatches
 from math import sqrt, log
 from itertools import islice
-
+import functions
 
 __author__ = 'duceppemo'
-__version__ = '0.3.4'
+__version__ = '0.3.5'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -37,6 +37,7 @@ __version__ = '0.3.4'
 # TODO -> Add stats (# of reads, # of pass, # of fail, top 10 channels, etc.)
 # TODO -> check for dependencies
 # TODO -> unit testing
+# TODO -> try to increase the speed of the average_phred calculation
 
 
 class FastqObjects(object):
@@ -220,8 +221,14 @@ class NanoQC(object):
 
         return optimal
 
-    # Iterator that yields start and end locations of a file chunk of default size 1MB.
     def chunkify(self, f):
+        """
+        Iterator that yields start and end locations of a file chunk of size 4MB.
+        Lazy function
+        :param f: file path
+        :return: iterator
+        """
+
         file_end = os.path.getsize(f)
 
         # Adjust size of chunks so its equal to number of CPUs
@@ -246,13 +253,11 @@ class NanoQC(object):
                 break
             yield chunk
 
-    # read chunk
     def read_chunk(self, f, chunk_info):
         with open(f, 'rb', 1024 * 1024) as file_handle:
             file_handle.seek(chunk_info[0])
             return file_handle.read(chunk_info[1])
 
-    # End of chunk
     def find_end_of_chunk(self, file_handle):
         line = file_handle.readline()  # incomplete line
         position = file_handle.tell()
@@ -261,6 +266,12 @@ class NanoQC(object):
             position = file_handle.tell()
             line = file_handle.readline()
         file_handle.seek(position)  # revert one line
+
+    @staticmethod
+    def compute_average_quality(phred_list):
+        average_phred = -10 * log(sum([10 ** (q / -10) for q in phred_list]) / len(phred_list), 10)
+
+        return average_phred
 
     def parse_fastq_to_dict(self, l, my_dict, name, flag):
         header, seq, extra, qual = l  # get each component of list in a variable
@@ -276,19 +287,22 @@ class NanoQC(object):
         length = len(seq)
 
         # Average phred score
-        phred_list = list()
-        for letter in qual:
-            # phred_list.append(ord(letter))
-            phred_list.append(letter - 33)
+        # phred_list = list()
+        # for letter in qual:
+        #     # phred_list.append(ord(letter))
+        #     phred_list.append(letter - 33)
+        phred_list = [letter - 33 for letter in qual]
 
         # https://gigabaseorgigabyte.wordpress.com/2017/06/26/averaging-basecall-quality-scores-the-right-way/
         # average_phred = sum(phred_list) / len(phred_list)
-        average_phred = -10 * log(sum([10 ** (q / -10) for q in phred_list]) / len(phred_list), 10)
+        average_phred = functions.compute_average_quality(phred_list, length)  # cython
+        # average_phred1 = NanoQC.compute_average_quality(phred_list)
+        # print(round(average_phred1, 2), round(average_phred, 2))
 
         # GC percentage
         g_count = float(seq.count(b'G'))
         c_count = float(seq.count(b'C'))
-        gc = round((g_count + c_count) / float(length) * 100, 1)
+        gc = round((g_count + c_count) / float(length) * 100, 2)
 
         # Channel
         channel = header.split()[3].split(b'=')[1]
@@ -859,14 +873,16 @@ class NanoQC(object):
         # Parse the files in parallel
         pool = mp.Pool(self.cpu)
 
-        jobs = []
-        for f in l:
-            job = pool.apply_async(self.parse_file, [f])
-            jobs.append(job)
+        # jobs = []
+        # for f in l:
+        #     job = pool.apply_async(self.parse_file, [f])
+        #     jobs.append(job)
+        jobs = [pool.apply_async(self.parse_file, [f]) for f in l]
 
-        results = []
-        for j in jobs:
-            results.append(j.get())
+        # results = []
+        # for j in jobs:
+        #     results.append(j.get())
+        results = [j.get() for j in jobs]
 
         pool.close()
         pool.join()
@@ -887,6 +903,20 @@ class NanoQC(object):
     def make_fastq_plots(self, d):
 
         print("\nMaking plots:")
+
+        print('\tPlotting phred_score_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_phred_score_distribution(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
+        start_time = time()
+        self.plot_gc_vs_qual_vs_time_3D(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
 
         print('\tPlotting pores_qual_output_vs_time_all...', end="", flush=True)
         start_time = time()
@@ -947,13 +977,6 @@ class NanoQC(object):
         print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_bp_per_sample_vs_time(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting phred_score_distribution...', end="", flush=True)
-        start_time = time()
-        self.plot_phred_score_distribution(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -2716,7 +2739,7 @@ class NanoQC(object):
         plt.legend()
 
         plt.tight_layout()  # Get rid of extra margins around the plot
-        fig.savefig(self.output_folder + "/pores_qual_output_vs_time_all.png")
+        fig.savefig(self.output_folder + "/pores_qual_output_vs_time_all.png")\
 
     @staticmethod
     def find_best_matrix(n_sample):
@@ -2814,6 +2837,47 @@ class NanoQC(object):
         plt.tight_layout(rect=[0.02, 0.02, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(self.output_folder + "/pores_gc_output_vs_time_per_sample.png")
 
+    def plot_gc_vs_qual_vs_time_3D(self, d):
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        my_dict = defaultdict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = (seq.gc, seq.average_phred, seq.flag, seq.time_string)
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['%GC', 'Phred score', 'flag', 'time_string'])
+
+        # convert datatime to elapsed hours
+        time_zero = min(df['time_string'])  # looking for min of 1st elements of list of tuples
+        df['time_string'] = df['time_string'] - time_zero
+        df['time_string'] = df['time_string'].dt.total_seconds() / 3600
+
+        df_pass = df[df['flag'] == 'pass']
+        df_fail = df[df['flag'] == 'fail']
+
+        # g = sns.regplot(x=df_pass['%GC'], y=df_pass['Phred score'], scatter=True,
+        #                 scatter_kws={'s': 0.5, 'alpha': 0.01}, label='Pass', color='blue')
+        # if not df_fail.empty:
+        #     sns.regplot(x=df_fail['%GC'], y=df_fail['Phred score'], scatter=True,
+        #                 scatter_kws={'s': 0.5, 'alpha': 0.01}, label='Fail', color='red')
+
+        ax.scatter(df_pass['%GC'].tolist(), df_pass['time_string'].tolist(), df_pass['Phred score'].tolist(),
+                   c='blue', s=0.5, alpha=0.01)
+        if not df_fail.empty:
+            ax.scatter(df_fail['%GC'].tolist(), df_fail['time_string'].tolist(), df_fail['Phred score'].tolist(),
+                       c='red', s=0.5, alpha=0.01)
+
+        # ax.legend()
+        ax.set_xlabel('%GC')
+        ax.set_zlabel('Phred score')
+        ax.set_ylabel('Sequencing time (h)')
+        ax.set_title('Correlation between %GC and Phred score over time')
+        ax.view_init(60, 35)
+        # plt.tight_layout()  # Get rid of extra margins around the plot
+        fig.savefig(self.output_folder + "/gc_vs_qual_vs_time_3D.png")
+
     # Summary plots
 
     def parse_summary(self, d):
@@ -2860,7 +2924,6 @@ class NanoQC(object):
 
     def make_summary_plots(self, d):
         print("\nMaking plots:")
-
 
         print('\tPlotting reads_per_sample_pie...', end="", flush=True)
         start_time = time()
@@ -3913,7 +3976,9 @@ class NanoQC(object):
         # Plot
         fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
 
-        for i, my_tuple in enumerate([(df_all, 'All', 'Greens'), (df_pass, 'Pass', 'Blues'), (df_fail, 'Fail', 'Reds')]):
+        for i, my_tuple in enumerate([(df_all, 'All', 'Greens'),
+                                      (df_pass, 'Pass', 'Blues'),
+                                      (df_fail, 'Fail', 'Reds')]):
             my_df = my_tuple[0]
             flag = my_tuple[1]
             cmap = my_tuple[2]
