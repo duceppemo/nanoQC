@@ -28,7 +28,7 @@ from itertools import islice
 import functions
 
 __author__ = 'duceppemo'
-__version__ = '0.3.5'
+__version__ = '0.3.6'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -911,9 +911,9 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
+        print('\tPlotting length_distribution...', end="", flush=True)
         start_time = time()
-        self.plot_gc_vs_qual_vs_time_3D(d)
+        self.plot_length_distribution(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -981,13 +981,6 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
 
-        print('\tPlotting length_distribution...', end="", flush=True)
-        start_time = time()
-        self.plot_length_distribution(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
         # print('\tPlotting pores_output_vs_time_total...', end="", flush=True)
         # start_time = time()
         # self.plot_pores_output_vs_time_total(d)
@@ -1048,6 +1041,13 @@ class NanoQC(object):
         print('\tPlotting pores_gc_output_vs_time_all...', end="", flush=True)
         start_time = time()
         self.plot_pores_gc_output_vs_time_all(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
+        start_time = time()
+        self.plot_gc_vs_qual_vs_time_3D(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -1470,39 +1470,28 @@ class NanoQC(object):
 
         fig, ax = plt.subplots()
 
-        qual_pass = list()
-        qual_fail = list()
+        my_dict = dict()
         for seq_id, seq in d.items():
-            if seq.flag == 'pass':
-                qual_pass.append(round(seq.average_phred, 1))
-            else:
-                qual_fail.append(round(seq.average_phred, 1))
+            my_dict[seq_id] = [seq.average_phred, seq.flag]
 
-        mean_pass_qual = None
-        mean_fail_qual = None
-        if qual_pass:
-            mean_pass_qual = np.round(np.mean(qual_pass), 1)
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Phred score', 'flag'])
+        df_pass = df.loc[df['flag'] == 'pass']
+        df_fail = df.loc[df['flag'] == 'fail']
 
-        if qual_fail:
-            mean_fail_qual = np.round(np.mean(qual_fail), 1)
+        average_qual_pass = round(functions.compute_average_quality(df_pass['Phred score'].tolist(),
+                                                                    df_pass.shape[0]), 1)
+        average_qual_fail = round(functions.compute_average_quality(df_fail['Phred score'].tolist(),
+                                                              df_fail.shape[0]), 1)
 
-        # Print plot
-        if qual_pass and qual_fail:
-            ax.hist([qual_pass, qual_fail],
-                    bins=np.arange(min(min(qual_pass), min(qual_fail)), max(max(qual_pass), max(qual_fail))),
-                    color=['blue', 'red'],
-                    label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
-        elif qual_pass:
-            ax.hist(qual_pass,
-                    bins=np.arange(min(qual_pass), max(qual_pass)),
-                    color='blue',
-                    label="pass (Avg: %s)" % mean_pass_qual)
-        else:
-            ax.hist(qual_fail,
-                    bins=np.arange(min(qual_fail), max(qual_fail)),
-                    color='red',
-                    label="fail (Avg: %s)" % mean_fail_qual)
+        ax.hist(df_pass['Phred score'], histtype='stepfilled', color='blue', alpha=0.6,
+                label='Pass (Avg: {})'.format(average_qual_pass))
+
+        if not df_fail.empty:
+            ax.hist(df_fail['Phred score'], histtype='stepfilled', color='red', alpha=0.6,
+                    label='Fail (Avg: {})'.format(average_qual_fail))
+
         plt.legend()
+
         ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
@@ -1516,38 +1505,33 @@ class NanoQC(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        size_pass = list()
-        size_fail = list()
-        for seq_id, seq in d.items():
-            if seq.flag == 'pass':
-                size_pass.append(seq.length)
-            else:
-                size_fail.append(seq.length)
-
-        if size_fail:  # assume "pass" always present
-            min_len = min(min(size_pass), min(size_fail))
-            max_len = max(max(size_pass), max(size_fail))
-            mean_pass_size = np.round(np.mean(size_pass), 1)
-            mean_fail_size = np.round(np.mean(size_fail), 1)
-        elif size_pass:
-            min_len = min(size_pass)
-            max_len = max(size_pass)
-            mean_pass_size = np.round(np.mean(size_pass), 1)
-        else:
-            print("No reads detected!")
-            return
-
-        # Print plot
         fig, ax = plt.subplots()
-        binwidth = int(np.round(10 * np.log10(max_len - min_len)))
-        logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
-        if size_fail:
-            plt.hist([size_pass, size_fail],
-                     bins=logbins,
-                     color=['blue', 'red'],
-                     label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
-        else:
-            plt.hist(size_pass, bins=logbins, color='blue', label="pass (Avg: %s)" % mean_pass_size)
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [seq.length, seq.flag]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length', 'flag'])
+        df_pass = df.loc[df['flag'] == 'pass']
+        df_fail = df.loc[df['flag'] == 'fail']
+
+        # Set bin sized for histogram
+        min_len = min(df['Length'])
+        max_len = max(df['Length'])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        len_logbins = np.logspace(min_exp, max_exp, 50)
+
+        average_len_pass = int(df_pass['Length'].mean())
+        average_len_fail = int(df_fail['Length'].mean())
+
+        ax.hist(df_pass['Length'], histtype='stepfilled', color='blue', alpha=0.6,
+                label="Pass (Avg: {} bp)".format(average_len_pass), bins=len_logbins)
+
+        if not df_fail.empty:
+            ax.hist(df_fail['Length'], histtype='stepfilled', color='red', alpha=0.6,
+                    label="Fail (Avg: {} bp)".format(average_len_fail), bins=len_logbins)
+
         plt.legend()
         plt.xscale('log')
         ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
@@ -2863,20 +2847,21 @@ class NanoQC(object):
         #     sns.regplot(x=df_fail['%GC'], y=df_fail['Phred score'], scatter=True,
         #                 scatter_kws={'s': 0.5, 'alpha': 0.01}, label='Fail', color='red')
 
-        ax.scatter(df_pass['%GC'].tolist(), df_pass['time_string'].tolist(), df_pass['Phred score'].tolist(),
+        ax.scatter(df_pass['time_string'].tolist(), df_pass['%GC'].tolist(), df_pass['Phred score'].tolist(),
                    c='blue', s=0.5, alpha=0.01)
         if not df_fail.empty:
-            ax.scatter(df_fail['%GC'].tolist(), df_fail['time_string'].tolist(), df_fail['Phred score'].tolist(),
+            ax.scatter(df_fail['time_string'].tolist(), df_fail['%GC'].tolist(), df_fail['Phred score'].tolist(),
                        c='red', s=0.5, alpha=0.01)
 
         # ax.legend()
-        ax.set_xlabel('%GC')
+        ax.set_xlabel('Sequencing time (h)')
+        ax.set_ylabel('%GC')
         ax.set_zlabel('Phred score')
-        ax.set_ylabel('Sequencing time (h)')
         ax.set_title('Correlation between %GC and Phred score over time')
         ax.view_init(60, 35)
         # plt.tight_layout()  # Get rid of extra margins around the plot
         fig.savefig(self.output_folder + "/gc_vs_qual_vs_time_3D.png")
+        # plt.show()
 
     # Summary plots
 
@@ -2925,6 +2910,20 @@ class NanoQC(object):
     def make_summary_plots(self, d):
         print("\nMaking plots:")
 
+        print('\tPlotting phred_score_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_phred_score_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
+        print('\tPlotting length_distribution...', end="", flush=True)
+        start_time = time()
+        self.plot_length_distribution_summary(d)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
         print('\tPlotting reads_per_sample_pie...', end="", flush=True)
         start_time = time()
         self.plot_reads_per_sample_pie_summary(d)
@@ -2963,20 +2962,6 @@ class NanoQC(object):
         print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         self.plot_bp_per_sample_vs_time_summary(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting length_distribution...', end="", flush=True)
-        start_time = time()
-        self.plot_length_distribution_summary(d)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting phred_score_distribution...', end="", flush=True)
-        start_time = time()
-        self.plot_phred_score_distribution_summary(d)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
@@ -3443,39 +3428,27 @@ class NanoQC(object):
 
         fig, ax = plt.subplots()
 
-        qual_pass = list()
-        qual_fail = list()
+        my_dict = dict()
         for seq_id, seq in d.items():
-            if seq.flag == b'True':
-                qual_pass.append(round(float(seq.average_phred), 1))
-            else:
-                qual_fail.append(round(float(seq.average_phred), 1))
+            my_dict[seq_id] = [float(seq.average_phred), seq.flag.decode('ascii')]
 
-        mean_pass_qual = None
-        mean_fail_qual = None
-        if qual_pass:
-            mean_pass_qual = np.round(np.mean(qual_pass), 1)
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Phred score', 'flag'])
+        df_pass = df.loc[df['flag'] == 'True']
+        df_fail = df.loc[df['flag'] == 'False']
 
-        if qual_fail:
-            mean_fail_qual = np.round(np.mean(qual_fail), 1)
+        average_qual_pass = functions.compute_average_quality(df_pass['Phred score'].tolist(), df_pass.shape[0])
+        average_qual_fail = functions.compute_average_quality(df_fail['Phred score'].tolist(), df_fail.shape[0])
 
-        # Print plot
-        if qual_pass and qual_fail:
-            ax.hist([qual_pass, qual_fail],
-                    bins=np.arange(min(min(qual_pass), min(qual_fail)), max(max(qual_pass), max(qual_fail))),
-                    color=['blue', 'red'],
-                    label=["pass (Avg: %s)" % mean_pass_qual, "fail (Avg: %s)" % mean_fail_qual])
-        elif qual_pass:
-            ax.hist(qual_pass,
-                    bins=np.arange(min(qual_pass), max(qual_pass)),
-                    color='blue',
-                    label="pass (Avg: %s)" % mean_pass_qual)
-        else:
-            ax.hist(qual_fail,
-                    bins=np.arange(min(qual_fail), max(qual_fail)),
-                    color='red',
-                    label="fail (Avg: %s)" % mean_fail_qual)
+        ax.hist(df_pass['Phred score'], histtype='stepfilled', color='blue', alpha=0.6,
+
+                label='Pass (Avg: {})'.format(average_qual_pass))
+
+        if not df_fail.empty:
+            ax.hist(df_fail['Phred score'], histtype='stepfilled', color='red', alpha=0.6,
+                    label='Fail (Avg: {})'.format(average_qual_fail))
+
         plt.legend()
+
         ax.set(xlabel='Phred score', ylabel='Frequency', title='Phred score distribution')
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         plt.tight_layout()
@@ -3489,40 +3462,33 @@ class NanoQC(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        size_pass = list()
-        size_fail = list()
-        for seq_id, seq in d.items():
-            if seq.flag == b'True':
-                size_pass.append(int(seq.length))
-            else:
-                size_fail.append(int(seq.length))
-
-        mean_fail_size = None
-        mean_pass_size = None
-        if size_fail:  # assume "pass" always present
-            min_len = min(min(size_pass), min(size_fail))
-            max_len = max(max(size_pass), max(size_fail))
-            mean_pass_size = np.round(np.mean(size_pass), 1)
-            mean_fail_size = np.round(np.mean(size_fail), 1)
-        elif size_pass:
-            min_len = min(size_pass)
-            max_len = max(size_pass)
-            mean_pass_size = np.round(np.mean(size_pass), 1)
-        else:
-            print("No reads detected!")
-            return
-
-        # Print plot
         fig, ax = plt.subplots()
-        binwidth = int(np.round(10 * np.log10(max_len - min_len)))
-        logbins = np.logspace(np.log10(min_len), np.log10(max_len), binwidth)
-        if size_fail:
-            plt.hist([size_pass, size_fail],
-                     bins=logbins,
-                     color=['blue', 'red'],
-                     label=["pass (Avg: %s)" % mean_pass_size, "fail (Avg: %s)" % mean_fail_size])
-        else:
-            plt.hist(size_pass, bins=logbins, color='blue', label="pass (Avg: %s)" % mean_pass_size)
+
+        my_dict = dict()
+        for seq_id, seq in d.items():
+            my_dict[seq_id] = [float(seq.length), seq.flag.decode('ascii')]
+
+        df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['Length', 'flag'])
+        df_pass = df.loc[df['flag'] == 'True']
+        df_fail = df.loc[df['flag'] == 'False']
+
+        # Set bin sized for histogram
+        min_len = min(df['Length'])
+        max_len = max(df['Length'])
+        min_exp = np.log10(min_len)
+        max_exp = np.log10(max_len)
+        len_logbins = np.logspace(min_exp, max_exp, 50)
+
+        average_len_pass = int(df_pass['Length'].mean())
+        average_len_fail = int(df_fail['Length'].mean())
+
+        ax.hist(df_pass['Length'], histtype='stepfilled', color='blue', alpha=0.6,
+                label="Pass (Avg: {} bp)".format(average_len_pass), bins=len_logbins)
+
+        if not df_fail.empty:
+            ax.hist(df_fail['Length'], histtype='stepfilled', color='red', alpha=0.6,
+                    label="Fail (Avg: {} bp)".format(average_len_fail), bins=len_logbins)
+
         plt.legend()
         plt.xscale('log')
         ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
@@ -3555,9 +3521,6 @@ class NanoQC(object):
         max_exp = np.log10(max_len)
         min_value = float(10 ** (min_exp - 0.1))
         max_value = float(10 ** (max_exp + 0.1))
-
-        # Set bin sized for histogram
-        # len_logbins = np.logspace(min_exp, max_exp, 25)
 
         # Set bin sized for histogram
         len_logbins = np.logspace(min_exp, max_exp, 50)
