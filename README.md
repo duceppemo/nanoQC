@@ -1,3 +1,5 @@
+https://github.com/duceppemo/nanoQC
+
 # nanoQC
 
 TODO:
