@@ -16,7 +16,6 @@ cdef inline double fastPow(double a, double b):
 def compute_average_quality(list phred_list, long l):
     cdef double q = 0.0
     cdef double prob = 0.0
-    cdef double tmp = 0.0
     cdef double average_phred = 0.0
 
     for q in phred_list:
