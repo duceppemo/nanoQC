@@ -38,7 +38,7 @@ Note that nanoQC will look detect the key words 'pass' and 'fail' from absolute 
 
 With fastq file(s) as input:
 ```
-nanoQC.py -f /fastq/folder/ -o /output/folder/
+nanoQC_Guppy_v3.1.5.py -f /fastq/folder/ -o /output/folder/
 ```
 With 'sequencing_summary.txt' as input:
 ```
