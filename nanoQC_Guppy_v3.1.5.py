@@ -35,6 +35,7 @@ class NanoQC(object):
         self.input_folder = args.fastq
         self.input_summary = args.summary
         self.output_folder = args.output
+        self.cpu = args.threads
 
         # Shared data structure(s)
         self.sample_dict = defaultdict()
@@ -45,9 +46,6 @@ class NanoQC(object):
 
         # Time tracking
         self.total_time = list()
-
-        # Threading
-        self.cpu = mp.cpu_count()
 
         # run the script
         self.run()
@@ -463,16 +461,27 @@ class NanoQC(object):
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser(description='Plot QC data from nanopore sequencing run')
+    from multiprocessing import cpu_count
+
+    cpu = cpu_count()
+    guppy_version = '3.1.5'
+
+    parser = ArgumentParser(description='Create QC plots using nanopore sequencing or basecalling data')
     parser.add_argument('-f', '--fastq', metavar='/basecalled/folder/',
                         required=False,
                         help='Input folder with fastq file(s),gzipped or not')
     parser.add_argument('-s', '--summary', metavar='sequencing_summary.txt',
                         required=False,
-                        help='The "sequencing_summary.txt" file produced by the Albacore basecaller')
+                        help='The "sequencing_summary.txt" file produced by guppy_basecaller v{}'.format(
+                            guppy_version)
+                        )
     parser.add_argument('-o', '--output', metavar='/qc/',
                         required=True,
                         help='Output folder')
+    parser.add_argument('-t', '--threads', metavar='{}'.format(cpu),
+                        required=False, default=cpu,
+                        help='Number of CPU'
+                             'Default {}'.format(cpu))
 
     # Get the arguments into an object
     arguments = parser.parse_args()
