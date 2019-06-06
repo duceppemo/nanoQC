@@ -1,4 +1,3 @@
-from time import time
 import os
 import gzip
 from concurrent import futures

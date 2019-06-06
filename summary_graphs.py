@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.patches as mpatches
+from dateutil.parser import parse
 import functions
 
 
@@ -57,7 +58,10 @@ class SummaryPlots(object):
         # Fetch and prepare data from dictionary
         my_dict = defaultdict()
         for seq_id, seq in d.items():
-            my_dict[seq_id] = (float(seq.time_stamp), int(seq.length), seq.flag)
+            try:
+                my_dict[seq_id] = (float(seq.time_stamp), int(seq.length), seq.flag)
+            except:
+                t =1
 
         # convert dictionary to pandas dataframe
         df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', 'length', 'flag'])
@@ -461,66 +465,67 @@ class SummaryPlots(object):
 
             fig, ax = plt.subplots(figsize=(10, 4))
 
+
+            ################################################
+            # Fetch required information
+            my_sample_dict = defaultdict()
+            for seq_id, seq in d.items():
+                if seq.name not in my_sample_dict:
+                    my_sample_dict[seq.name] = defaultdict()
+                my_sample_dict[seq.name][seq_id] = (seq.time_stamp,  # hours
+                                                    round(float(seq.average_phred), 1),
+                                                    seq.flag)  # time in h
+
+            # Order the dictionary by keys
+            od = OrderedDict(sorted(my_sample_dict.items()))
+
+            # Make the plot
             ts_pass = list()
             ts_fail = list()
-            for seq_id, seq in d.items():
-                if seq.flag == 'pass':
-                    #         average_phred = round(average_phred_full, 1)
-                    ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 1))))
-                else:
-                    ts_fail.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+            for name, sub_dict in od.items():
+                for seq_id, data_tuple in sub_dict.items():
+                    if data_tuple[2] == b'TRUE':
+                        ts_pass.append(data_tuple)
+                    else:
+                        ts_fail.append(data_tuple)
 
-            ts_zero_pass = None
-            ts_zero_fail = None
+            # Prepare x values (time)
+            ts_pass[:] = [tuple(((float(x) / 3600), int(y))) for x, y, z in ts_pass]  # Convert to hours (float)
+            ts_pass.sort(key=lambda x: x[0])  # Sort according to first element in tuples
+            ts_pass[:] = [tuple((int(np.round(x)), y)) for x, y in ts_pass]  # Round hours
+            # x_values_pass = [x for x, y in ts_pass]  # Only get the fist value of the ordered tuples
+
+            ts_fail[:] = [tuple(((float(x) / 3600), int(y))) for x, y, z in ts_fail]  # Convert to hours (float)
+            ts_fail.sort(key=lambda x: x[0])  # Sort according to first element in tuples
+            ts_fail[:] = [tuple((int(np.round(x)), y)) for x, y in ts_fail]  # Round hours
+            # x_values_fail = [x for x, y in ts_fail]  # Only get the fist value of the ordered tuples
+
+            ################################################
+
             if ts_pass:
-                ts_zero_pass = min(ts_pass, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
-
-            if ts_fail:
-                ts_zero_fail = min(ts_fail, key=lambda x: x[0])[0]  # looking for min of 1st elements of the tuple list
-
-            if ts_pass and ts_fail:
-                ts_zero = min(ts_zero_pass, ts_zero_fail)
-            elif ts_pass:
-                ts_zero = ts_zero_pass
-            else:  # elif ts_fail:
-                ts_zero = ts_zero_fail
-
-            ts_pass3 = list()
-            ts_fail3 = list()
-            if ts_pass:
-                ts_pass1 = [tuple(((x - ts_zero), y)) for x, y in ts_pass]  # Subtract t_zero for the all time points
-                ts_pass1.sort(key=lambda x: x[0])  # Sort according to first element in tuple
-                ts_pass2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_pass1]  # Convert to hours (float)
-                ts_pass3 = [tuple((int(np.round(x)), y)) for x, y in ts_pass2]  # Round hours
-
-                df_pass = pd.DataFrame(list(ts_pass3),
+                df_pass = pd.DataFrame(list(ts_pass),
                                        columns=['Sequencing time interval (h)', 'Phred score'])  # Convert to dataframe
                 df_pass['Flag'] = pd.Series('pass', index=df_pass.index)  # Add a 'Flag' column to the end with 'pass' value
 
             if ts_fail:
-                ts_fail1 = [tuple(((x - ts_zero), y)) for x, y in ts_fail]
-                ts_fail1.sort(key=lambda x: x[0])
-                ts_fail2 = [tuple(((x.days * 24 + x.seconds / 3600), y)) for x, y in ts_fail1]
-                ts_fail3 = [tuple((int(np.round(x)), y)) for x, y in ts_fail2]
-
-                df_fail = pd.DataFrame(list(ts_fail3), columns=['Sequencing time interval (h)', 'Phred score'])
+                df_fail = pd.DataFrame(list(ts_fail), columns=['Sequencing time interval (h)', 'Phred score'])
                 df_fail['Flag'] = pd.Series('fail', index=df_fail.index)  # Add a 'Flag' column to the end with 'fail' value
 
             # Account if there is no fail data or no pass data
-            if ts_fail3 and ts_pass3:
+            if ts_fail and ts_pass:
                 frames = [df_pass, df_fail]
                 data = pd.concat(frames)  # Merge dataframes
-            elif ts_pass3:
+            elif ts_pass:
                 data = df_pass
             else:  # elif ts_fail3:
                 data = df_fail
 
             # Account if there is no fail data or no pass data
-            if ts_fail3 and ts_pass3:
+            if ts_fail and ts_pass:
                 g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, hue='Flag', split=True,
                                    inner=None)
                 g.figure.suptitle('Sequence quality over time')
-            elif ts_pass3:
+            elif ts_pass:
                 g = sns.violinplot(x='Sequencing time interval (h)', y='Phred score', data=data, inner=None)
                 g.figure.suptitle('Sequence quality over time (pass only)')
             else:  # elif ts_fail3:

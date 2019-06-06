@@ -5,13 +5,12 @@ import sys
 from argparse import ArgumentParser
 import numpy as np
 from time import time
-import multiprocessing as mp
 from collections import defaultdict
-import functions
 from fastq_parser import FastqParser
 from fastq_graphs import FastqPlots
 from summary_parser import SummaryParser
 from summary_graphs import SummaryPlots
+import functions
 
 
 __author__ = 'duceppemo'
@@ -333,6 +332,13 @@ class NanoQC(object):
 
         print("\nMaking plots:")
 
+        print('\tPlotting quality_vs_time...', end="", flush=True)
+        start_time = time()
+        SummaryPlots.plot_quality_vs_time_summary(d, out)
+        end_time = time()
+        interval = end_time - start_time
+        print(" took %s" % self.elapsed_time(interval))
+
         print('\tPlotting pores_length_output_vs_time_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_pores_length_output_vs_time_all_summary(d, out)
@@ -448,13 +454,6 @@ class NanoQC(object):
         print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_channel_output_all_summary(d, out)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
-
-        print('\tPlotting quality_vs_time...', end="", flush=True)
-        start_time = time()
-        SummaryPlots.plot_quality_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % self.elapsed_time(interval))
