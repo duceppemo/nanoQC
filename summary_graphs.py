@@ -473,7 +473,7 @@ class SummaryPlots(object):
                 if seq.name not in my_sample_dict:
                     my_sample_dict[seq.name] = defaultdict()
                 my_sample_dict[seq.name][seq_id] = (seq.time_stamp,  # hours
-                                                    round(float(seq.average_phred), 1),
+                                                    round(float(seq.average_phred), 2),
                                                     seq.flag)  # time in h
 
             # Order the dictionary by keys

@@ -613,9 +613,9 @@ class FastqPlots(object):
         for seq_id, seq in d.items():
             if seq.flag == 'pass':
                 #         average_phred = round(average_phred_full, 1)
-                ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+                ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 2))))
             else:
-                ts_fail.append(tuple((seq.time_string, round(seq.average_phred, 1))))
+                ts_fail.append(tuple((seq.time_string, round(seq.average_phred, 2))))
 
         ts_zero_pass = None
         ts_zero_fail = None
