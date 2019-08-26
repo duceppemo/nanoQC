@@ -28,7 +28,6 @@ __version__ = '0.3.6'
 class NanoQC(object):
 
     def __init__(self, args):
-
         """Define objects based on supplied arguments"""
         self.args = args
         self.input_folder = args.fastq
@@ -69,7 +68,7 @@ class NanoQC(object):
             read_counter = FastqParser.parse_fastq_parallel(self.input_fastq_list, self.sample_dict, self.cpu)
             end_time = time()
             interval = end_time - start_time
-            print(" took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+            print(" took %s for %d reads" % (NanoQC.elapsed_time(interval), read_counter))
 
             # Check if there is data
             if not self.sample_dict:
@@ -83,7 +82,7 @@ class NanoQC(object):
             # Print read stats
             end_time = time()
             interval = end_time - start_time
-            print(" took %s for %d reads" % (self.elapsed_time(interval), read_counter))
+            print(" took %s for %d reads" % (NanoQC.elapsed_time(interval), read_counter))
 
             # Check if there is data
             if not self.summary_dict:
@@ -96,7 +95,7 @@ class NanoQC(object):
         # pp.pprint(self.sample_dict)
 
         self.total_time.append(time())
-        print("\n Total run time: {}".format(self.elapsed_time(self.total_time[1] - self.total_time[0])))
+        print("\n Total run time: {}".format(NanoQC.elapsed_time(self.total_time[1] - self.total_time[0])))
 
     def check_dependencies(self):
         pass
@@ -140,7 +139,7 @@ class NanoQC(object):
         """
         Convert bytes to KB, MB, GB or TB
         :param num: a file size in bytes
-        :return: A string repreresenting the size of the file with proper units
+        :return: A string representing the size of the file with proper units
         """
         for x in ['bytes', 'KB', 'MB', 'GB']:
             if num < 1024.0:
@@ -148,11 +147,12 @@ class NanoQC(object):
             num /= 1024.0
         return "%3.1f%s" % (num, 'TB')
 
-    def elapsed_time(self, seconds):
+    @staticmethod
+    def elapsed_time(seconds):
         """
         Transform a time value into a string
         :param seconds: Elapsed time in seconds
-        :return: Formated time string
+        :return: Formatted time string
         """
         minutes, seconds = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
@@ -170,119 +170,119 @@ class NanoQC(object):
         FastqPlots.plot_pores_output_vs_time_all(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting bp_per_sample_pie...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_bp_per_sample_pie(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting phred_score_distribution...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_phred_score_distribution(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting length_distribution...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_length_distribution(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_qual_output_vs_time_all...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_pores_qual_output_vs_time_all(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_length_output_vs_time_all...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_pores_length_output_vs_time_all(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_per_sample_pie...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_reads_per_sample_pie(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_channel_output_all(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting total_reads_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_total_reads_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting total_bp_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_total_bp_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_reads_vs_bp_per_sample(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_reads_per_sample_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_bp_per_sample_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         # print('\tPlotting pores_output_vs_time_total...', end="", flush=True)
         # start_time = time()
         # FastqPlots.plot_pores_output_vs_time_total(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting quality_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_quality_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         # print('\tPlotting quality_vs_length_scatter...', end="", flush=True)
         # start_time = time()
         # FastqPlots.plot_quality_vs_length_scatter(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length_hex...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_quality_vs_length_hex(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         # print('\tPlotting quality_vs_length_kde...', end="", flush=True)
         # start_time = time()
@@ -290,42 +290,42 @@ class NanoQC(object):
         # # self.test_plot(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting gc_vs_time...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_gc_vs_time(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting gc_vs_length_hex...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_gc_vs_length_hex(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_gc_output_vs_time_all...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_pores_gc_output_vs_time_all(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_gc_vs_qual_vs_time_3D(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_pores_gc_output_vs_time_per_sample(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
     def make_summary_plots(self, d):
         out = self.output_folder
@@ -337,126 +337,126 @@ class NanoQC(object):
         SummaryPlots.plot_quality_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_length_output_vs_time_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_pores_length_output_vs_time_all_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_qual_output_vs_time_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_pores_qual_output_vs_time_all_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting phred_score_distribution...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_phred_score_distribution_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting length_distribution...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_length_distribution_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_per_sample_pie...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_reads_per_sample_pie_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting bp_per_sample_pie...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_bp_per_sample_pie_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting total_reads_vs_time...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_total_reads_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting total_bp_vs_time...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_total_bp_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_reads_per_sample_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting bp_per_sample_vs_time...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_bp_per_sample_vs_time_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting quality_vs_length_hex...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_quality_vs_length_hex_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting reads_vs_bp_per_sample...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_reads_vs_bp_per_sample_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting pores_output_vs_time_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_pores_output_vs_time_all_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
         # print('\tPlotting pores_output_vs_time...', end="", flush=True)
         # start_time = time()
         # SummaryPlots.plot_pores_output_vs_time_summary(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
         # print('\tPlotting channel_output_total...', end="", flush=True)
         # start_time = time()
         # SummaryPlots.plot_channel_output_total(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
         #
         # print('\tPlotting channel_output_pass_fail...', end="", flush=True)
         # start_time = time()
         # SummaryPlots.plot_channel_output_pass_fail(d, out)
         # end_time = time()
         # interval = end_time - start_time
-        # print(" took %s" % self.elapsed_time(interval))
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
         print('\tPlotting channel_output_all...', end="", flush=True)
         start_time = time()
         SummaryPlots.plot_channel_output_all_summary(d, out)
         end_time = time()
         interval = end_time - start_time
-        print(" took %s" % self.elapsed_time(interval))
+        print(" took %s" % NanoQC.elapsed_time(interval))
 
 
 if __name__ == '__main__':

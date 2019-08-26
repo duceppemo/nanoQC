@@ -20,6 +20,14 @@ class FastqObjects(object):
 class FastqParser(object):
     @staticmethod
     def parse_fastq_to_dict(l, my_dict, name, flag):
+        """
+        Get info and stats from header, sequence and quality lines . Update master dictionary with info.
+        :param l: a list of 4 items, for each line of the fastq entry
+        :param my_dict: an empty dictionary to store results
+        :param name: sample name
+        :param flag: pass or fail
+        :return:
+        """
         header, seq, extra, qual = l  # get each component of list in a variable
 
         # Guppy v3.1.5
@@ -57,6 +65,11 @@ class FastqParser(object):
 
     @staticmethod
     def parse_file(f):
+        """
+        Open file and read 4 lines (one fastq entry) and call parse_fastq_to_dict to compute metrics
+        :param f: Fastq file to parse
+        :return: dictionary
+        """
         name = os.path.basename(f).split('.')[0]
         name = name.replace('_pass', '')
         name = name.replace('_fail', '')
@@ -65,10 +78,15 @@ class FastqParser(object):
         if 'fail' in f:
             flag = 'fail'  # Check in path for the word "fail"
 
+        # Check file size
+        size = os.path.getsize(f)
+        if size == 0:
+            return  # Exit function and don't process that file
+
         # Parse
         my_dict = {}
         with gzip.open(f, 'rb', 1024 * 1024) if f.endswith('gz') else open(f, 'rb', 1024 * 1024) as file_handle:
-            lines = []
+            lines = []  # a list to store the 4 lines of a fastq entry in order
             for line in file_handle:
                 if not line:  # end of file?
                     break
@@ -77,12 +95,22 @@ class FastqParser(object):
                     FastqParser.parse_fastq_to_dict(lines, my_dict, name, flag)
                     lines = []
                 lines.append(line)
-            FastqParser.parse_fastq_to_dict(lines, my_dict, name, flag)
+            # Parse the last entry of the file
+            if len(lines) == 4:
+                FastqParser.parse_fastq_to_dict(lines, my_dict, name, flag)
 
         return my_dict
 
     @staticmethod
     def parse_fastq_parallel(l, d, cpu):
+        """
+        Parse fastq files in parallel
+
+        :param l: list of files
+        :param d: dictionary
+        :param cpu: number of files to process in parallel
+        :return: Number or reads
+        """
         with futures.ProcessPoolExecutor(max_workers=cpu) as pool:
             results = pool.map(FastqParser.parse_file, l, chunksize=1)
 
