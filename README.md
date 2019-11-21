@@ -11,25 +11,26 @@ TODO:
 ## Description
 Quality control of Oxford Nanopore Technologies sequencing data basecalled qith Albacore. Works with fastq file(s) or the 'sequencing_summary.txt' file from Albacore.
 
-## Dependencies
-This is a python3 program and depends on the following packages:
-```
-python3
-numpy
-pandas
-matplotlib==3.1.0
-seaborn==0.9.0
-Cython
-```
 ## Installation
-Install dependecies:
+```
+conda config --add channels conda-forge
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels r
+
+conda create -n nanoQC python=3
+
+conda install numpy python-dateutil cython pandas matplotlib seaborn
+
+git clone https://github.com/duceppemo/nanoQC.git
+
+cd nanoQC
+
+# Compile the cython module
+python setup.py build_ext --inplace
+```
 ```
 # TODO -> create requirements.txt
-```
-
-Compile the cython module:
-```
-python setup.py build_ext --inplace
 ```
 
 ## Usage
