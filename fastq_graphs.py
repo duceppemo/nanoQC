@@ -1349,7 +1349,7 @@ class FastqPlots(object):
         time_list_all[:] = [x.days * 1440 + x.seconds / 60 for x in time_list_all]  # Convert to minutes (float)
         time_list_all[:] = [int(np.round(x)) for x in time_list_all]  # Round minutes
         # Check how many 15-minute bins are required to plot all the data
-        nbins = max(time_list_all) / 15 if max(time_list_all) % 15 == 0 else int(max(time_list_all) / 15) + 1
+        nbins = int(max(time_list_all) / 15) if max(time_list_all) % 15 == 0 else int(max(time_list_all) / 15) + 1
         # Create the bin boundaries
         x_bins = np.linspace(min(time_list_all), max(time_list_all), nbins)  # every 15 min
 
