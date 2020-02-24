@@ -230,12 +230,13 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots()
         t_pass = list()  # time
         t_fail = list()
 
         for seq_id, seq in d.items():
             t = seq.time_string
+            if not t:
+                return
             if seq.flag == 'pass':
                 t_pass.append(t)
             else:
@@ -258,6 +259,8 @@ class FastqPlots(object):
             t_zero = t_zero_fail
         else:
             raise Exception('No data!')
+
+        fig, ax = plt.subplots()
 
         # Prepare datetime value for plotting
         # Convert time object in hours from beginning of run
@@ -302,13 +305,11 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        # fig, ax = plt.subplots()
-        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
-
         # Fetch required information
         my_sample_dict = defaultdict()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             if seq.flag == 'pass':
                 if seq.name not in my_sample_dict:
                     my_sample_dict[seq.name] = defaultdict()
@@ -316,6 +317,10 @@ class FastqPlots(object):
 
         # Order the dictionary by keys
         od = OrderedDict(sorted(my_sample_dict.items()))
+
+        # fig, ax = plt.subplots()
+        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
 
         # Make the plot
         legend_names = list()
@@ -467,11 +472,11 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
-
         # Fetch required information
         my_sample_dict = defaultdict()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             if seq.flag == 'pass':
                 if seq.name not in my_sample_dict:
                     my_sample_dict[seq.name] = defaultdict()
@@ -479,6 +484,8 @@ class FastqPlots(object):
 
         # Order the dictionary by keys
         od = OrderedDict(sorted(my_sample_dict.items()))
+
+        fig, ax = plt.subplots(figsize=(10, 6))  # In inches
 
         # Make the plot
         for name, seq_ids in od.items():
@@ -526,12 +533,12 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots()
-
         # Fetch required information
         ts_pass = list()
         ts_fail = list()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             if seq.flag == 'pass':
                 ts_pass.append(tuple((seq.time_string, seq.length)))
             else:
@@ -551,6 +558,8 @@ class FastqPlots(object):
             ts_zero = ts_zero_pass
         else:  # elif ts_fail:
             ts_zero = ts_zero_fail
+
+        fig, ax = plt.subplots()
 
         x_pass_values = None
         y_pass_values = None
@@ -606,11 +615,11 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
         ts_pass = list()
         ts_fail = list()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             if seq.flag == 'pass':
                 #         average_phred = round(average_phred_full, 1)
                 ts_pass.append(tuple((seq.time_string, round(seq.average_phred, 2))))
@@ -660,6 +669,8 @@ class FastqPlots(object):
             data = df_pass
         else:  # elif ts_fail3:
             data = df_fail
+
+        fig, ax = plt.subplots(figsize=(10, 6))
 
         # Account if there is no fail data or no pass data
         if ts_fail3 and ts_pass3:
@@ -1327,14 +1338,14 @@ class FastqPlots(object):
 
         import matplotlib.lines as mlines
 
-        fig, ax = plt.subplots()
-
         time_list_all = list()
         time_list_pass = list()
         time_list_fail = list()
 
         for seq_id, seq in d.items():
             time_string = seq.time_string
+            if not time_string:
+                return
             time_list_all.append(time_string)
             if seq.flag == 'pass':
                 time_list_pass.append(time_string)
@@ -1342,6 +1353,8 @@ class FastqPlots(object):
                 time_list_fail.append(time_string)
 
         time_zero = min(time_list_all)  # find smallest datetime value
+
+        fig, ax = plt.subplots()
 
         # Plot all
         # time_list_all = sorted(time_list_all)  # order list
@@ -1439,6 +1452,8 @@ class FastqPlots(object):
 
         channel_dict = defaultdict()
         for seq_id, seq in d.items():
+            if not seq.channel:
+                return
             channel_number = int(seq.channel)
             # Pass and fail apart
             if channel_number not in channel_dict:
@@ -1508,11 +1523,11 @@ class FastqPlots(object):
         name, length, flag, average_phred, gc, time_string
         """
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
         ts_pass = list()
         ts_fail = list()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             if seq.flag == 'pass':
                 #         average_phred = round(average_phred_full, 1)
                 ts_pass.append(tuple((seq.time_string, round(seq.gc, 1))))
@@ -1563,6 +1578,8 @@ class FastqPlots(object):
             data = df_pass
         else:  # elif ts_fail3:
             data = df_fail
+
+        fig, ax = plt.subplots(figsize=(10, 6))
 
         # Account if there is no fail data or no pass data
         if ts_fail3 and ts_pass3:
@@ -1680,14 +1697,14 @@ class FastqPlots(object):
     @staticmethod
     def plot_pores_gc_output_vs_time_all(d, out):
 
-        fig, ax = plt.subplots()
-
         time_list_all = list()
         time_list_pass = list()
         time_list_fail = list()
 
         for seq_id, seq in d.items():
             time_string = seq.time_string
+            if not time_string:
+                return
             time_list_all.append(tuple((time_string, seq.gc)))
             if seq.flag == 'pass':
                 time_list_pass.append(tuple((time_string, seq.gc)))
@@ -1715,6 +1732,8 @@ class FastqPlots(object):
         time_list_pass[:] = [tuple((x.days * 24 + x.seconds / 3600, y)) for x, y in time_list_pass]  # Convert to min
         x = [x for x, y in time_list_pass]
         y = [y for x, y in time_list_pass]
+
+        fig, ax = plt.subplots()
 
         sns.regplot(x=x, y=y, x_bins=x_bins, fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
                     label='Pass', color='blue')
@@ -1750,6 +1769,8 @@ class FastqPlots(object):
         my_dict = defaultdict()
         for seq_id, seq in d.items():
             my_dict[seq_id] = (seq.time_string, seq.length, seq.flag)
+            if not seq.time_string:
+                return
 
         # convert dictionary to pandas dataframe
         df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', 'length', 'flag'])
@@ -1795,6 +1816,8 @@ class FastqPlots(object):
         my_dict = defaultdict()
         for seq_id, seq in d.items():
             my_dict[seq_id] = (seq.time_string, seq.average_phred, seq.flag)
+            if not seq.time_string:
+                return
 
         # convert dictionary to pandas dataframe
         df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', 'average_phred', 'flag'])
@@ -1838,6 +1861,8 @@ class FastqPlots(object):
     def plot_pores_gc_output_vs_time_per_sample(d, out):
         my_dict = defaultdict()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             my_dict[seq_id] = (seq.time_string, seq.gc, seq.flag, seq.name)
 
         df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['time_string', '%GC', 'flag', 'name'])
@@ -1911,11 +1936,10 @@ class FastqPlots(object):
     def plot_gc_vs_qual_vs_time_3D(d, out):
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-
         my_dict = defaultdict()
         for seq_id, seq in d.items():
+            if not seq.time_string:
+                return
             my_dict[seq_id] = (seq.gc, seq.average_phred, seq.flag, seq.time_string)
 
         df = pd.DataFrame.from_dict(my_dict, orient='index', columns=['%GC', 'Phred score', 'flag', 'time_string'])
@@ -1927,6 +1951,9 @@ class FastqPlots(object):
 
         df_pass = df[df['flag'] == 'pass']
         df_fail = df[df['flag'] == 'fail']
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
 
         # g = sns.regplot(x=df_pass['%GC'], y=df_pass['Phred score'], scatter=True,
         #                 scatter_kws={'s': 0.5, 'alpha': 0.01}, label='Pass', color='blue')

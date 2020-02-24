@@ -22,6 +22,9 @@ class FastqParser(object):
     def parse_fastq_to_dict(l, my_dict, name, flag):
         """
         Get info and stats from header, sequence and quality lines . Update master dictionary with info.
+
+        ***Sequences downloaded from SRA don't have all the information in the header
+
         :param l: a list of 4 items, for each line of the fastq entry
         :param my_dict: an empty dictionary to store results
         :param name: sample name
@@ -40,8 +43,9 @@ class FastqParser(object):
 
         # Read Time stamp
         time_string = next((t for t in items if b'start_time=' in t), None)
-        time_string = time_string.split(b'=')[1]
-        time_string = parse(time_string)
+        if time_string:
+            time_string = time_string.split(b'=')[1]
+            time_string = parse(time_string)
 
         # Sequence length
         length = len(seq)
@@ -57,7 +61,8 @@ class FastqParser(object):
 
         # Channel
         channel = next((c for c in items if b'ch=' in c), None)
-        channel = channel.split(b'=')[1]
+        if channel:
+            channel = channel.split(b'=')[1]
 
         seq = FastqObjects(name, length, flag, average_phred, gc, time_string, channel)
 
