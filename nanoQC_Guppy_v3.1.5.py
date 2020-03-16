@@ -10,11 +10,12 @@ from fastq_parser import FastqParser
 from fastq_graphs import FastqPlots
 from summary_parser import SummaryParser
 from summary_graphs import SummaryPlots
+import pathlib
 import functions
 
 
 __author__ = 'duceppemo'
-__version__ = '0.3.6'
+__version__ = '0.4'
 
 
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
@@ -34,6 +35,7 @@ class NanoQC(object):
         self.input_summary = args.summary
         self.output_folder = args.output
         self.cpu = args.threads
+        self.single = args.individual
 
         # Shared data structure(s)
         self.sample_dict = defaultdict()
@@ -74,7 +76,20 @@ class NanoQC(object):
             if not self.sample_dict:
                 raise Exception('No data!')
             else:
-                self.make_fastq_plots(self.sample_dict)  # make the plots for fastq files
+                if self.single:
+                    name_list = list(
+                        map(lambda x: os.path.basename(x).split('.')[0].replace('_pass', '').replace('_fail', ''),
+                            self.input_fastq_list))
+                    for name in name_list:
+                        single_sample_dict = dict()
+                        for read_id, info in self.sample_dict.items():
+                            if info.name == name:
+                                single_sample_dict[read_id] = info
+                        out_folder = self.output_folder + '/' + name
+                        NanoQC.make_folder(out_folder)
+                        self.make_fastq_plots(single_sample_dict, out_folder)
+                else:
+                    self.make_fastq_plots(self.sample_dict, self.output_folder)  # make the plots for fastq files
         else:  # elif self.input_summary:
             print("Parsing summary file...", end='', flush=True)
             start_time = time()
@@ -134,6 +149,9 @@ class NanoQC(object):
             # check if input_fastq_list is not empty
             if not self.input_fastq_list:
                 raise Exception("No fastq file found in %s!" % self.input_folder)
+        if self.single:
+            if self.input_summary:
+                raise Exception('Per sample reporting has not been implemented yet for the summary file, sorry...')
 
     def hbytes(self, num):
         """
@@ -161,8 +179,11 @@ class NanoQC(object):
         time_string = ''.join('{}{}'.format(int(np.round(value)), name) for name, value in periods if value)
         return time_string
 
-    def make_fastq_plots(self, d):
-        out = self.output_folder
+    @staticmethod
+    def make_folder(folder):
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+
+    def make_fastq_plots(self, d, out):
         print("\nMaking plots:")
 
         print('\tPlotting pores_output_vs_time_all...', end="", flush=True)
@@ -463,12 +484,12 @@ if __name__ == '__main__':
     from multiprocessing import cpu_count
 
     cpu = cpu_count()
-    guppy_version = '3.1.5'
+    guppy_version = '>=3.1.5'
 
     parser = ArgumentParser(description='Create QC plots using nanopore sequencing or basecalling data')
     parser.add_argument('-f', '--fastq', metavar='/basecalled/folder/',
                         required=False,
-                        help='Input folder with fastq file(s),gzipped or not')
+                        help='Input folder with fastq file(s), gzipped or not')
     parser.add_argument('-s', '--summary', metavar='sequencing_summary.txt',
                         required=False,
                         help='The "sequencing_summary.txt" file produced by guppy_basecaller v{}'.format(
@@ -479,8 +500,11 @@ if __name__ == '__main__':
                         help='Output folder')
     parser.add_argument('-t', '--threads', metavar='{}'.format(cpu),
                         required=False, default=cpu,
-                        help='Number of CPU'
-                             'Default {}'.format(cpu))
+                        type=int,
+                        help='Number of CPU. Default {}'.format(cpu))
+    parser.add_argument('-i', '--individual',
+                        action='store_true',
+                        help='Produce a nanoQC report for each files instead of combining them in a single report')
 
     # Get the arguments into an object
     arguments = parser.parse_args()
