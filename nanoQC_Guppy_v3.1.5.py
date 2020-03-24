@@ -87,6 +87,7 @@ class NanoQC(object):
                                 single_sample_dict[read_id] = info
                         out_folder = self.output_folder + '/' + name
                         NanoQC.make_folder(out_folder)
+                        print("Making plots for {}:".format(name))
                         self.make_fastq_plots(single_sample_dict, out_folder)
                 else:
                     self.make_fastq_plots(self.sample_dict, self.output_folder)  # make the plots for fastq files
@@ -334,19 +335,20 @@ class NanoQC(object):
         interval = end_time - start_time
         print(" took %s" % NanoQC.elapsed_time(interval))
 
-        print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
-        start_time = time()
-        FastqPlots.plot_gc_vs_qual_vs_time_3D(d, out)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % NanoQC.elapsed_time(interval))
+        # print('\tPlotting gc_vs_qual_vs_time_3D...', end="", flush=True)
+        # start_time = time()
+        # FastqPlots.plot_gc_vs_qual_vs_time_3D(d, out)
+        # end_time = time()
+        # interval = end_time - start_time
+        # print(" took %s" % NanoQC.elapsed_time(interval))
 
-        print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
-        start_time = time()
-        FastqPlots.plot_pores_gc_output_vs_time_per_sample(d, out)
-        end_time = time()
-        interval = end_time - start_time
-        print(" took %s" % NanoQC.elapsed_time(interval))
+        if not self.single:
+            print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
+            start_time = time()
+            FastqPlots.plot_pores_gc_output_vs_time_per_sample(d, out)
+            end_time = time()
+            interval = end_time - start_time
+            print(" took %s" % NanoQC.elapsed_time(interval))
 
     def make_summary_plots(self, d):
         out = self.output_folder
