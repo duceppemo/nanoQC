@@ -18,8 +18,8 @@ conda config --add channels defaults
 conda config --add channels bioconda
 conda config --add channels r
 
-conda create -n nanoQC python=3
-
+conda create -n nanoQC python=3.6
+conda activate nanoQC
 conda install numpy python-dateutil cython pandas matplotlib seaborn
 
 git clone https://github.com/duceppemo/nanoQC.git

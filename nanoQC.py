@@ -14,16 +14,15 @@ import pathlib
 import functions
 
 
-__author__ = 'duceppemo'
-__version__ = '0.4'
-
-
 # TODO -> Check if can parallel parse (chunks) the sample processed in parallel?
 # TODO -> Add a function to rename the samples with a conversion table (two-column tab-separated file)
 # TODO -> make proper log file
 # TODO -> Add stats (# of reads, # of pass, # of fail, top 10 channels, etc.)
 # TODO -> check for dependencies
 # TODO -> unit testing
+# TODO -> add support for fasta
+# TODO -> add support for generic fastq
+# TODO -> change it so it works on Guppy output folder directly
 
 
 class NanoQC(object):
@@ -343,12 +342,13 @@ class NanoQC(object):
         # print(" took %s" % NanoQC.elapsed_time(interval))
 
         if not self.single:
-            print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
-            start_time = time()
-            FastqPlots.plot_pores_gc_output_vs_time_per_sample(d, out)
-            end_time = time()
-            interval = end_time - start_time
-            print(" took %s" % NanoQC.elapsed_time(interval))
+            if len(self.input_fastq_list) > 1:
+                print('\tPlotting pores_gc_output_vs_time_per_sample...', end="", flush=True)
+                start_time = time()
+                FastqPlots.plot_pores_gc_output_vs_time_per_sample(d, out)
+                end_time = time()
+                interval = end_time - start_time
+                print(" took %s" % NanoQC.elapsed_time(interval))
 
     def make_summary_plots(self, d):
         out = self.output_folder
