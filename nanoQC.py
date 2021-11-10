@@ -231,7 +231,7 @@ class NanoQC(object):
         end_time = time()
         interval = end_time - start_time
         print(" took %s" % NanoQC.elapsed_time(interval))
-        exit()
+
         print('\tPlotting plot_gc_distribution_per_sample...', end="", flush=True)
         start_time = time()
         FastqPlots.plot_gc_distribution_per_sample(df, out)
