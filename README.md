@@ -34,7 +34,27 @@ python setup.py build_ext --inplace
 ```
 
 ## Usage
+```
+usage: nanoQC.py [-h] [-f /basecalled/folder/] [-s sequencing_summary.txt] -o
+                 /qc/ [-t 48] [-p 4] [-i]
 
+Create QC plots using nanopore sequencing or basecalling data
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f /basecalled/folder/, --fastq /basecalled/folder/
+                        Input folder with fastq file(s), gzipped or not
+  -s sequencing_summary.txt, --summary sequencing_summary.txt
+                        The "sequencing_summary.txt" file produced by
+                        guppy_basecaller
+  -o /qc/, --output /qc/
+                        Output folder
+  -t 48, --threads 48   Number of CPU. Default 48
+  -p 4, --parallel 4    Number of samples to process in parallel.
+  -i, --individual      Produce a nanoQC report for each files instead of
+                        combining them in a single report
+
+```
 Note that nanoQC will look detect the key words 'pass' and 'fail' from absolute path of the file(s). If found, graph will provide the quality information for each group.
 
 With fastq file(s) as input:

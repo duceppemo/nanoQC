@@ -2,6 +2,8 @@ import os
 import gzip
 from concurrent import futures
 from dateutil.parser import parse
+import multiprocessing as mp
+from itertools import repeat, islice
 import functions
 
 
@@ -19,109 +21,104 @@ class FastqObjects(object):
 
 class FastqParser(object):
     @staticmethod
-    def parse_fastq_to_dict(l, my_dict, name, flag):
-        """
-        Get info and stats from header, sequence and quality lines . Update master dictionary with info.
+    def hbytes(num):
+        for x in ['bytes', 'KB', 'MB', 'GB']:
+            if num < 1024.0:
+                return "%3.1f%s" % (num, x)
+            num /= 1024.0
+        return "%3.1f%s" % (num, 'TB')
 
-        ***Sequences downloaded from SRA don't have all the information in the header
+    @staticmethod
+    def make_chunks(file_handle, size):
+        while True:
+            chunk = list(islice(file_handle, size))
+            if not chunk:
+                break
+            yield chunk
 
-        :param l: a list of 4 items, for each line of the fastq entry
-        :param my_dict: an empty dictionary to store results
-        :param name: sample name
-        :param flag: pass or fail
-        :return:
-        """
-        header, seq, extra, qual = l  # get each component of list in a variable
+    @staticmethod
+    def read_entry(entry, name, flag):
+        my_dict = dict()
+        lines = list()
+        for line in entry:
+            line = line.rstrip()
+            lines.append(line)
+            if len(lines) == 4:
+                my_dict.update(FastqParser.single_fastq_entry_to_dict(lines, name, flag))
+                lines = list()
+        return my_dict
 
-        # Guppy v3.1.5
-        # @9ab0b453-9b87-4c7f-925d-e700919d955f runid=2223752dbeaf60b17877fd21486a51f7974218ca sampleid=PSM read=5089 ch=226 start_time=2019-05-30T00:14:52Z
-        # @092edb67-90bb-4abe-976e-30ee11798c38 runid=2223752dbeaf60b17877fd21486a51f7974218ca read=46236 ch=388 start_time=2019-05-31T01:50:16Z flow_cell_id=FAK82962 protocol_group_id=PSMWGS-2 sample_id=PSM barcode=unclassified
+    @staticmethod
+    def single_fastq_entry_to_dict(fastq_entry, name, flag):
+        header, seq, extra, qual = fastq_entry  # get each component of list in a variable
+
+        items = header.split()
 
         # Sequence ID
-        items = header.split()
-        seq_id = items[0]
+        seq_id = items[0][1:]  # remove the leading "@"
 
-        # Read Time stamp
-        time_string = next((t for t in items if b'start_time=' in t), None)
+        # Time stamp
+        time_string = next((t for t in items if 'start_time=' in t), None)
         if time_string:
-            time_string = time_string.split(b'=')[1]
+            time_string = time_string.split('=')[1]
             time_string = parse(time_string)
 
-        # Sequence length
+        # Read length
         length = len(seq)
 
         # Average phred score
-        phred_list = [letter - 33 for letter in qual]
+        phred_list = [ord(letter) - 33 for letter in qual]
         average_phred = functions.compute_average_quality(phred_list, length)  # cython
 
-        # GC percentage
-        g_count = float(seq.count(b'G'))
-        c_count = float(seq.count(b'C'))
+        # %GC
+        g_count = float(seq.count('G'))
+        c_count = float(seq.count('C'))
         gc = round((g_count + c_count) / float(length) * 100, 2)
 
-        # Channel
-        channel = next((c for c in items if b'ch=' in c), None)
+        channel = next((c for c in items if 'ch=' in c), None)
         if channel:
-            channel = channel.split(b'=')[1]
+            channel = channel.split('=')[1]
 
         seq = FastqObjects(name, length, flag, average_phred, gc, time_string, channel)
-
+        my_dict = dict()
         my_dict[seq_id] = seq
-
-    @staticmethod
-    def parse_file(f):
-        """
-        Open file and read 4 lines (one fastq entry) and call parse_fastq_to_dict to compute metrics
-        :param f: Fastq file to parse
-        :return: dictionary
-        """
-        name = os.path.basename(f).split('.')[0]
-        name = name.replace('_pass', '')
-        name = name.replace('_fail', '')
-
-        flag = 'pass'  # Default value
-        if 'fail' in f:
-            flag = 'fail'  # Check in path for the word "fail"
-
-        # Check file size
-        size = os.path.getsize(f)
-        if size == 0:
-            return  # Exit function and don't process that file
-
-        # Parse
-        my_dict = {}
-        with gzip.open(f, 'rb', 1024 * 1024) if f.endswith('gz') else open(f, 'rb', 1024 * 1024) as file_handle:
-            lines = []  # a list to store the 4 lines of a fastq entry in order
-            for line in file_handle:
-                if not line:  # end of file?
-                    break
-                line = line.rstrip()
-                if len(lines) == 4:
-                    FastqParser.parse_fastq_to_dict(lines, my_dict, name, flag)
-                    lines = []
-                lines.append(line)
-            # Parse the last entry of the file
-            if len(lines) == 4:
-                FastqParser.parse_fastq_to_dict(lines, my_dict, name, flag)
 
         return my_dict
 
     @staticmethod
-    def parse_fastq_parallel(l, d, cpu):
-        """
-        Parse fastq files in parallel
+    def iterate_fastq_parallel(input_fastq, cpu, parallel):
+        # Name
+        name = os.path.basename(input_fastq).split('.')[0].split('_')[0]
+        name = name.replace('_pass', '')
+        name = name.replace('_fail', '')
 
-        :param l: list of files
-        :param d: dictionary
-        :param cpu: number of files to process in parallel
-        :return: Number or reads
-        """
-        with futures.ProcessPoolExecutor(max_workers=cpu) as pool:
-            results = pool.map(FastqParser.parse_file, l, chunksize=1)
+        # Flag
+        flag = 'pass'  # Default value
+        if 'fail' in input_fastq:
+            flag = 'fail'  # Check in path for the word "fail"
 
-        # Update dictionary with results from every chunk
-        read_counter = 0
-        for dictionary in results:
-            read_counter += len(dictionary.keys())
-            d.update(dictionary)  # Do the merge
-        return read_counter
+        # Chunk fastq files and run chunks in parallel
+        fastq_dict = dict()
+        with gzip.open(input_fastq, "rt") if input_fastq.endswith('.gz') else open(input_fastq, "r") as f:
+            pool = mp.Pool(int(cpu / parallel))
+            jobs = [pool.apply_async(FastqParser.read_entry, [chunk, name, flag]) for chunk in FastqParser.make_chunks(
+                f, 4000)]
+            results = [j.get() for j in jobs]
+            pool.close()
+            pool.join()
+            pool.terminate()  # Needed to do proper garbage collection?
+
+            # Update self.sample_dict with results from every chunk
+            for d in results:
+                fastq_dict.update(d)  # Do the merge
+
+        return fastq_dict
+
+    @staticmethod
+    def parallel_process_fastq(fastq_list, cpu, parallel):
+        fastq_dict = dict()
+        with futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+            for results in executor.map(FastqParser.iterate_fastq_parallel, fastq_list, repeat(cpu), repeat(parallel)):
+                fastq_dict.update(results)
+
+        return fastq_dict
