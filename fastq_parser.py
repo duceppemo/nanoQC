@@ -79,7 +79,7 @@ class FastqParser(object):
         if channel:
             channel = channel.split('=')[1]
 
-        seq = FastqObjects(name, length, flag, average_phred, gc, time_string, channel)
+        seq = FastqObjects(name, length, flag, average_phred, gc, time_string, int(channel))
         my_dict = dict()
         my_dict[seq_id] = seq
 
