@@ -55,11 +55,11 @@ optional arguments:
                         combining them in a single report
 
 ```
-Note that nanoQC will look detect the key words 'pass' and 'fail' from absolute path of the file(s). If found, graph will provide the quality information for each group.
+Note that nanoQC will look detect the keywords 'pass' and 'fail' from absolute path of the file(s). If found, graph will provide the quality information for each group.
 
 With fastq file(s) as input:
 ```
-nanoQC_Guppy_v3.1.5.py -f /fastq/folder/ -o /output/folder/
+nanoQC.py -f /fastq/folder/ -o /output/folder/
 ```
 With 'sequencing_summary.txt' as input:
 ```
