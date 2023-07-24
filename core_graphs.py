@@ -272,15 +272,19 @@ class FastqPlots(object):
         df.reset_index(inplace=True, drop=True)  # Drop the index column from the dataframe
 
         # Group data by Time and Flag, count how many reads for each unit of time and transpose the dataframe
-        df = df.groupby(['Time', 'Flag'], as_index=False).size().pivot('Time', 'Flag', 'size')
+        df = df.groupby(['Time', 'Flag'], as_index=False).size().pivot(index='Time', columns='Flag', values='size')
 
         # Cumulative sum of counts for y values
         df['pass'] = df['pass'].cumsum()
-        df['fail'] = df['fail'].cumsum()
-
-        # Transpose back the new dataframe with the cumulative sum values
-        df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass', 'fail'],
-                     var_name='Flag', value_name='Count')
+        if 'fail' in df:
+            df['fail'] = df['fail'].cumsum()
+            # Transpose back the new dataframe with the cumulative sum values
+            df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass', 'fail'],
+                         var_name='Flag', value_name='Count')
+        else:
+            # Transpose back the new dataframe with the cumulative sum values
+            df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass'],
+                         var_name='Flag', value_name='Count')
 
         # Make the plot using seaborn
         fig, ax = plt.subplots()
@@ -393,9 +397,11 @@ class FastqPlots(object):
         # Fetch required information
         df = df1.loc[:, ('Name', 'Flag', 'Length')]
 
-        df_all = df.groupby(['Name']).sum()
-        df_pass = df[df['Flag'] == 'pass'].groupby(['Name']).sum()
-        df_fail = df[df['Flag'] == 'fail'].groupby(['Name']).sum()
+        # df_all = df.groupby(['Name']).sum()
+        # df_all = df.groupby('Name')['Length'].sum()
+        df_all = df.groupby('Name')['Length'].sum().to_frame()
+        df_pass = df[df['Flag'] == 'pass'].groupby('Name')['Length'].sum().to_frame()
+        df_fail = df[df['Flag'] == 'fail'].groupby('Name')['Length'].sum().to_frame()
 
         mpl.style.use('default')
 
@@ -432,7 +438,7 @@ class FastqPlots(object):
         # Add label to axes
         plt.subplots_adjust(hspace=1)
         fig.suptitle('Distribution of bp among samples', fontsize=18)
-        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "suptitile" [left, bottom, right, top]
+        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=0.5)  # accounts for the "subtitile" [left, bottom, right, top]
         fig.savefig(out + "/bp_per_sample_pie.png")
         plt.close()
 
@@ -502,11 +508,19 @@ class FastqPlots(object):
 
         # Cumulative sum of counts for y values
         df['pass'] = df['pass'].cumsum()
-        df['fail'] = df['fail'].cumsum()
+        if 'fail' in df:
+            df['fail'] = df['fail'].cumsum()
+            # Transpose back the new dataframe with the cumulative sum values
+            df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass', 'fail'],
+                         var_name='Flag', value_name='cumsum')
+        else:
+            # Transpose back the new dataframe with the cumulative sum values
+            df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass'],
+                         var_name='Flag', value_name='cumsum')
 
-        # Transpose back the new dataframe with the cumulative sum values
-        df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass', 'fail'],
-                     var_name='Flag', value_name='cumsum')
+        # # Transpose back the new dataframe with the cumulative sum values
+        # df = pd.melt(df.reset_index(), id_vars=['Time'], value_vars=['pass', 'fail'],
+        #              var_name='Flag', value_name='cumsum')
 
         # Make the plot usinf seaborn
         fig, ax = plt.subplots()
@@ -515,7 +529,7 @@ class FastqPlots(object):
         # Add a comma for the thousands
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         # Set the axes and figure titles
-        ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Total read yield')
+        ax.set(xlabel='Time (h)', ylabel='Number of bp', title='Total bp yield')
         # Remove legend title:
         g.legend_.set_title(None)
 
@@ -1108,22 +1122,28 @@ class FastqPlots(object):
         if not df_fail.empty:  # fail reads might be missing if plotting filtered reads for example.
             # Pass
             hist, edges = np.histogram(df_pass['Time'], bins=x_bins, density=False)
-            sns.scatterplot(data=hist, x_bins=edges, alpha=0.5, linewidth=0, color='blue')  # cmap='Blues')
+            my_dict = dict(x=edges, y=hist)
+            df = pd.DataFrame(my_dict)
+            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='blue')
 
             # Fail
             hist, edges = np.histogram(df_fail['Time'], bins=x_bins, density=False)
-            sns.scatterplot(data=hist, x_bins=edges, alpha=0.5, linewidth=0, color='red')  # cmap='Reds')
+            my_dict = dict(x=edges, y=hist)
+            df = pd.DataFrame(my_dict)
+            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='red')
 
         # Generate counts for each bin
-        # hist, edges = np.histogram(time_list_all, bins=x_bins, density=False)
         hist, edges = np.histogram(df['Time'], bins=x_bins, density=False)
+        edges = np.delete(edges, 0)  # Delete heading "zero" in edges
+        my_dict = dict(x=edges, y=hist)  # Create dictionary from binned data (nparray)
+        df = pd.DataFrame(my_dict)  # Convert dictionary to pandas DataFrame (required input for sns.regplot)
         # Plot the data
-        sns.scatterplot(data=hist, x_bins=edges, alpha=0.5, linewidth=0, color='green')  # cmap='Greens')
+        sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='green')
 
-        # Adjust format of numbers for y axis: "1000000" -> "1,000,000"
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
 
-        # Change x axis labels chunk-of-15-min to hours
+        # Change x-axis labels chunk-of-15-min to hours
         def numfmt(m, pos):
             h = '{}'.format(m / 4)
             return h
@@ -1176,17 +1196,17 @@ class FastqPlots(object):
 
         # Sum pass and fail reads per channel
         df = df1.loc[:, ('Channel', 'Flag')]
-        df = df.groupby(['Channel', 'Flag'], as_index=False).size().pivot('Channel', 'Flag', 'size')
+        df = df.groupby(['Channel', 'Flag'], as_index=False).size().pivot(
+            index='Channel', columns='Flag', values='size')
 
         df_all = pd.DataFrame()
-        df_all['All'] = df['pass'] + df['fail']
-        df_pass = df[['pass']]  # The double square brackets keep the column name
-        df_fail = df[['fail']]
+        if 'fail' in df:
+            df_all['All'] = df['pass'] + df['fail']
+            df_pass = df[['pass']]  # The double square brackets keep the column name
+            df_fail = df[['fail']]
 
-        # Plot
-        if not df_fail['fail'].sum() == 0:
+            # Plot
             fig, axs = plt.subplots(nrows=3, figsize=(6, 12))
-
             for i, my_tuple in enumerate([(df_all, 'All', 'Greens'),
                                           (df_pass, 'pass', 'Blues'),
                                           (df_fail, 'fail', 'Reds')]):
@@ -1208,6 +1228,9 @@ class FastqPlots(object):
                             ax=axs[i])
                 axs[i].set_title("{} reads output per channel".format(flag))
         else:
+            df_all['All'] = df['pass']
+            df_pass = df[['pass']]  # The double square brackets keep the column name
+
             fig, ax = plt.subplots()
 
             maxval = max(df_pass.index)  # maximum channel value
@@ -1347,14 +1370,14 @@ class FastqPlots(object):
         # Make plot
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        g = sns.barplot(data=df, x='Name', y='Count', hue='Flag', ci=None)
-        # g = sns.barplot(data=df, x='Name', y='LengthCumSum', hue='Flag', ci=None)
+        g = sns.barplot(data=df, x='Name', y='Count', hue='Flag', errorbar=None)
+        # g = sns.barplot(data=df, x='Name', y='LengthCumSum', hue='Flag', errorbar=None)
 
         # # Top
-        # g = sns.barplot(data=df_total, x='Name', y='Count', color='blue', ci=None)
+        # g = sns.barplot(data=df_total, x='Name', y='Count', color='blue', errorbar=None)
         #
         # # Bottom
-        # g = sns.barplot(data=df_fail, x='Name', y='Count', color='red', estimator=sum, ci=None)
+        # g = sns.barplot(data=df_fail, x='Name', y='Count', color='red', estimator=sum, errorbar=None)
 
         g.figure.suptitle('Total read and length (bp) per sample')
         # Remove legend title

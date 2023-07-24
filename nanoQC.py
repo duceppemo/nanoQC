@@ -15,7 +15,7 @@ import pandas as pd
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.0'
+__version__ = '0.2.1'
 
 
 # TODO -> Modify to be compatible with direct output of Guppy
@@ -24,6 +24,12 @@ __version__ = '0.2.0'
 # TODO -> Add stats (# of reads, # of pass, # of fail, top 10 channels, etc.)
 # TODO -> check for dependencies
 # TODO -> unit testing
+
+'''
+mamba create -n nanoQC -c conda-forge -c bioconda -c plotly -y python=3.11.4 numpy=1.25.0 python-dateutil=2.8.2 \
+    cython=0.29.36 pandas=2.0.3 matplotlib=3.7.1 seaborn=0.12.2 plotly=5.15.0 python-dateutil=2.8.2 scikit-learn=1.3.0 \
+    
+'''
 
 
 class NanoQC(object):

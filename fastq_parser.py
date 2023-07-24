@@ -52,16 +52,16 @@ class FastqParser(object):
     def single_fastq_entry_to_dict(fastq_entry, name, flag):
         header, seq, extra, qual = fastq_entry  # get each component of list in a variable
 
+        # Split header line to get items
         items = header.split()
 
-        # Sequence ID
+        # Store items info in dictionary
+        read_dict = dict()
         seq_id = items[0][1:]  # remove the leading "@"
-
-        # Time stamp
-        time_string = next((t for t in items if 'start_time=' in t), None)
-        if time_string:
-            time_string = time_string.split('=')[1]
-            time_string = parse(time_string)
+        read_dict['seq_id'] = seq_id
+        for i in items[1:]:
+            key, value = i.split('=')
+            read_dict[key] = value
 
         # Read length
         length = len(seq)
@@ -75,9 +75,17 @@ class FastqParser(object):
         c_count = float(seq.count('C'))
         gc = round((g_count + c_count) / float(length) * 100, 2)
 
-        channel = next((c for c in items if 'ch=' in c), None)
-        if channel:
-            channel = channel.split('=')[1]
+        # Time stamp
+        try:
+            time_string = parse(read_dict['start_time'])
+        except KeyError:
+            time_string = ''
+
+        # Channel
+        try:
+            channel = read_dict['ch']
+        except KeyError:
+            channel = ''
 
         seq = FastqObjects(name, length, flag, average_phred, gc, time_string, int(channel))
         my_dict = dict()
