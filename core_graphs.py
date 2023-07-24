@@ -1105,9 +1105,6 @@ class FastqPlots(object):
             df.loc[:, 'Time'] = df.loc[:, 'Time'] / 60  # convert to hours
         df.loc[:, 'Time'] = df.loc[:, 'Time'].astype(int)  # convert to integer
 
-        df_pass = df[df.loc[:, 'Flag'] == 'pass']
-        df_fail = df[df.loc[:, 'Flag'] == 'fail']
-
         # Check how many 15-minute bins are required to plot all the data
         max_time = max(df.loc[:, 'Time'])
         min_time = min(df.loc[:, 'Time'])
@@ -1118,46 +1115,43 @@ class FastqPlots(object):
         # Make plot
         fig, ax = plt.subplots()
 
-        # If not fail, just draw the pass. Else, draw total, fail and pass
-        if not df_fail.empty:  # fail reads might be missing if plotting filtered reads for example.
-            # Pass
-            hist, edges = np.histogram(df_pass['Time'], bins=x_bins, density=False)
-            my_dict = dict(x=edges, y=hist)
-            df = pd.DataFrame(my_dict)
-            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='blue')
+        # Pass
+        df_pass = df[df['Flag'] == 'pass']
+        hist, edges = np.histogram(df_pass['Time'], bins=x_bins, density=False)
+        edges = np.delete(edges, 0)  # Delete heading "zero" in edges
+        sns.regplot(x=edges, y=hist, x_bins=x_bins, fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
+                    label='pass', color='blue')
 
+        # Fail
+        df_fail = df[df['Flag'] == 'fail']
+        if not df_fail.empty:  # If not fail, just draw the pass. Else, draw total, fail and pass
             # Fail
             hist, edges = np.histogram(df_fail['Time'], bins=x_bins, density=False)
             my_dict = dict(x=edges, y=hist)
             df = pd.DataFrame(my_dict)
-            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='red')
+            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.6, 's': 30}, fit_reg=False, color='red')
 
-        # Generate counts for each bin
-        hist, edges = np.histogram(df['Time'], bins=x_bins, density=False)
-        edges = np.delete(edges, 0)  # Delete heading "zero" in edges
-        my_dict = dict(x=edges, y=hist)  # Create dictionary from binned data (nparray)
-        df = pd.DataFrame(my_dict)  # Convert dictionary to pandas DataFrame (required input for sns.regplot)
-        # Plot the data
-        sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.5, 'linewidths': 0}, fit_reg=False, color='green')
+            # All
+            # Generate counts for each bin
+            hist, edges = np.histogram(df['Time'], bins=x_bins, density=False)
+            edges = np.delete(edges, 0)  # Delete heading "zero" in edges
+            my_dict = dict(x=edges, y=hist)  # Create dictionary from binned data (nparray)
+            df = pd.DataFrame(my_dict)  # Convert dictionary to pandas DataFrame (required input for sns.regplot)
+            sns.regplot(data=df, x='x', y='y', scatter_kws={'alpha': 0.6, 's': 30}, fit_reg=False, color='green')
 
         # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
 
-        # Change x-axis labels chunk-of-15-min to hours
-        def numfmt(m, pos):
-            h = '{}'.format(m / 4)
-            return h
-
-        ax.xaxis.set_major_formatter(FuncFormatter(numfmt))
-
         # Major ticks every 4 hours
         def my_formater(val, pos):
-            val_str = '{}'.format(int(val / 4))
+            val_str = '{}'.format(int(val / 4 / 60))
             return val_str
 
         # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
+        # https://matplotlib.org/stable/api/_as_gen/matplotlib.axis.Axis.set_major_formatter.html
+        # https://matplotlib.org/3.1.1/gallery/ticks_and_spines/tick-formatters.html
+        ax.xaxis.set_major_locator(MultipleLocator(60 * 4))
         ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
-        ax.xaxis.set_major_locator(MultipleLocator(4 * 4))  # 4 block of 15 min per hour. Want every 4 hours
 
         # Add legend to the plot area
         # https://stackoverflow.com/questions/47391702/matplotlib-making-a-colored-markers-legend-from-scratch
@@ -1169,13 +1163,12 @@ class FastqPlots(object):
         fail_marker = mlines.Line2D([], [], color='red', alpha=0.6, label='fail', marker='o',
                                     markersize=5, linestyle='None')
 
-        # if time_list_fail:
         if not df_fail.empty:
             ax.legend(handles=[all_marker, pass_marker, fail_marker], loc='upper right')
         else:
             green_circle = mlines.Line2D([], [], color='green', alpha=0.6, label='pass', marker='o',
                                          markersize=5, linestyle='None')
-            ax.legend(handles=[all_marker], loc='upper right')
+            ax.legend(handles=[pass_marker], loc='upper right')
 
         # Add label to axes
         plt.title('Pores output over time')
@@ -1183,7 +1176,6 @@ class FastqPlots(object):
         plt.xlabel('Sequencing time (hours)')
 
         plt.tight_layout()  # Get rid of extra margins around the plot
-        # fig = g.get_figure()  # Get figure from FacetGrid
         fig.savefig(out + "/pores_output_vs_time_all.png")
         plt.close()
 
