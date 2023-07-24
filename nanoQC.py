@@ -28,7 +28,7 @@ __version__ = '0.2.1'
 '''
 mamba create -n nanoQC -c conda-forge -c bioconda -c plotly -y python=3.11.4 numpy=1.25.0 python-dateutil=2.8.2 \
     cython=0.29.36 pandas=2.0.3 matplotlib=3.7.1 seaborn=0.12.2 plotly=5.15.0 python-dateutil=2.8.2 scikit-learn=1.3.0 \
-    
+    fpdf=1.7.2
 '''
 
 

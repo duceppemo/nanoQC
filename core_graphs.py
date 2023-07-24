@@ -338,6 +338,8 @@ class FastqPlots(object):
         # Set the axes and figure titles
         ax.set(xlabel='Time (h)', ylabel='Number of reads', title='Pass reads per sample')
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         # Remove legend title:
         g.legend_.set_title(None)
         # Remove extra white space around the figure
@@ -477,6 +479,8 @@ class FastqPlots(object):
         # Set the axes and figure titles
         ax.set(xlabel='Time (h)', ylabel='Number of base pairs', title='Yield per sample in base pair\n("pass" only)')
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         # Remove legend title:
         g.legend_.set_title(None)
         # Remove extra white space around the figure
@@ -561,9 +565,24 @@ class FastqPlots(object):
         # Account if there is no fail data or no pass data
         # g = sns.violinplot(x='Time', y='Qual', data=df, hue='Flag', split=True, inner=None)
         g = sns.boxplot(data=df, x='Time', y='Qual', hue='Flag', palette=['blue', 'red'], showfliers=False)
+
         g.figure.suptitle('Sequence quality over time')
-        # Remove legend title:
+
+        # Remove legend title
         g.legend_.set_title(None)
+
+        # # Remove legend title when using "hue"
+        # # https://stackoverflow.com/questions/51579215/remove-seaborn-lineplot-legend-title
+        # handles, labels = ax.get_legend_handles_labels()
+        # ax.legend(handles=handles[1:], labels=labels[1:])
+
+        # flag_series = pd.Series(df['Flag'])
+        # # Remove legend title:
+        # g.legend_.set_title(None)
+        # if 'fail' in flag_series:
+        #     plt.legend(title=None, loc=1, labels=['pass', 'fail'])  # Upper right
+        # else:
+        #     plt.legend(title=None, loc=1, labels=['pass'])  # Upper right
 
         # Major ticks every 4 hours
         # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
@@ -1273,6 +1292,9 @@ class FastqPlots(object):
                         fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
                         label='fail', color='red')
 
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
         # Set major ticks every 4 h
         ax.xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
 
@@ -1339,9 +1361,13 @@ class FastqPlots(object):
         fig, ax = plt.subplots(figsize=(10, 6))
 
         g = sns.boxplot(data=df, x='Name', y='Length', hue='Flag', palette=['blue', 'red'], showfliers=False)
+
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+
         g.figure.suptitle('Length distribution per sample')
-        # Remove legend title:
-        g.legend_.set_title(None)
+        g.legend_.set_title(None)  # Remove legend title
+        ax.tick_params(axis='x', rotation=45)  # Rotate tick text on 45 degree
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(out + "/length_distribution_per_sample.png")
@@ -1370,6 +1396,9 @@ class FastqPlots(object):
         #
         # # Bottom
         # g = sns.barplot(data=df_fail, x='Name', y='Count', color='red', estimator=sum, errorbar=None)
+
+        # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
 
         g.figure.suptitle('Total read and length (bp) per sample')
         # Remove legend title

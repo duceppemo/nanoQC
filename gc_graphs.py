@@ -62,7 +62,7 @@ class GcPlots(object):
         # g = sns.violinplot(data=df, x='Time', y='GC', hue='Flag',
         #                    split=True, inner=None)
         g = sns.boxplot(data=df, x='Time', y='GC', hue='Flag', palette=['blue', 'red'], showfliers=False)
-        g.figure.suptitle('Sequence quality over time')
+        g.figure.suptitle('%GC over time')
 
         # Major ticks every 4 hours
         # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
@@ -74,6 +74,7 @@ class GcPlots(object):
         ax.xaxis.set_major_formatter(FuncFormatter(my_formater))
         ax.xaxis.set_major_locator(MultipleLocator(4))
 
+        g.legend_.set_title(None)  # Remove legend title
         plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(out + "/gc_vs_time.png")
         plt.close()
@@ -177,9 +178,10 @@ class GcPlots(object):
         sns.regplot(data=df_pass, x='Time', y='GC', x_bins=x_bins, fit_reg=False, scatter_kws={'alpha': 0.6, 's': 30},
                     label='pass', color='blue')
 
-        sns.regplot(data=df_fail, x='Time', y='GC', x_bins=x_bins, fit_reg=False,
-                    scatter_kws={'alpha': 0.6, 's': 30},
-                    label='fail', color='red')
+        if not df_fail.empty:
+            sns.regplot(data=df_fail, x='Time', y='GC', x_bins=x_bins, fit_reg=False,
+                        scatter_kws={'alpha': 0.6, 's': 30},
+                        label='fail', color='red')
 
         # Set major ticks every 4 h
         ax.xaxis.set_major_locator(MultipleLocator(4))  # Want every 4 hours
@@ -320,8 +322,9 @@ class GcPlots(object):
 
         g = sns.boxplot(data=df, x='Name', y='GC', hue='Flag', palette=['blue', 'red'], showfliers=False)
         g.figure.suptitle('%GC distribution per sample')
-        # Remove legend title:
-        g.legend_.set_title(None)
+
+        g.legend_.set_title(None)  # Remove legend title
+        ax.tick_params(axis='x', rotation=45)  # Rotate tick text on 45 degree
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])  # accounts for the "suptitile" [left, bottom, right, top]
         fig.savefig(out + "/gc_distribution_per_sample.png")
