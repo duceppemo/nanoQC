@@ -1144,7 +1144,7 @@ class FastqPlots(object):
 
         # Major ticks every 4 hours
         def my_formater(val, pos):
-            val_str = '{}'.format(int(val / 4 / 60))
+            val_str = '{}'.format(int(val / 60))
             return val_str
 
         # https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
