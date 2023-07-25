@@ -1,4 +1,5 @@
 #!/usr/local/env python3
+import glob
 import multiprocessing as mp
 import os
 import sys
@@ -12,6 +13,8 @@ from gc_graphs import GcPlots
 from summary_parser import SummaryParser
 import pathlib
 import pandas as pd
+from fpdf import FPDF
+from PIL import Image
 
 
 __author__ = 'duceppemo'
@@ -112,6 +115,32 @@ class NanoQC(object):
             NanoQC.make_core_plots(df, self.output_folder)
         if self.input_folder:
             NanoQC.make_gc_plots(df, self.output_folder)
+
+        # https://stackoverflow.com/questions/43767328/python-fpdf-not-sizing-correctly
+        print('Creating PDF report...')
+        pdf_report = self.output_folder + '/nanoQC.pdf'
+        image_list = glob.glob(self.output_folder + '/*.png')
+        pdf = FPDF()  # Create fpdf object
+        for image in image_list:
+            cover = Image.open(image)
+            width, height = cover.size
+            width, height = float(width * 0.264583), float(height * 0.264583)  # Convert pixel to mm with 1px=0.264583mm
+
+            # given we are working with A4 format size
+            # letter format: 215.9 x 279.4
+            # P->portrait; L->Landscpae
+            pdf_size = {'P': {'w': 215.9, 'h': 279.4}, 'L': {'w': 279.4, 'h': 215.9}}
+
+            # Get page orientation from image size
+            orientation = 'P' if width < height else 'L'
+
+            # Make sure image size is not greater than the pdf format size
+            width = width if width < pdf_size[orientation]['w'] else pdf_size[orientation]['w']
+            height = height if height < pdf_size[orientation]['h'] else pdf_size[orientation]['h']
+
+            pdf.add_page(orientation=orientation)
+            pdf.image(image, 0, 0, width, height)
+        pdf.output(pdf_report, 'F')
 
         ending_time = time()
         print("\n Total run time: {}".format(NanoQC.elapsed_time(ending_time - beginning_time)))

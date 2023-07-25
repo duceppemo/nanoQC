@@ -369,7 +369,15 @@ class FastqPlots(object):
                 data_sum = sum(data)
                 labels = list(my_df.index)
                 for j, l in enumerate(labels):
-                    labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                    # labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                    if data[j] >= 1000000:
+                        labels[j] = "{:s} ({:,}M, {:.1f}%)".format(l, int(data[j] / 1000000),
+                                                                   round(data[j] / data_sum * 100, 1))
+                    elif 1000 <= data[j] < 1000000:
+                        labels[j] = "{:s} ({:,}k, {:.1f}%)".format(l, int(data[j] / 1000),
+                                                                   round(data[j] / data_sum * 100, 1))
+                    else:
+                        labels[j] = "{:s} ({:,}, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
 
                 axs[i].pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
                 axs[i].set_title(titles[i])
@@ -382,7 +390,15 @@ class FastqPlots(object):
             data_sum = sum(data)
             labels = list(df_pass.index)
             for j, l in enumerate(labels):
-                labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                # labels[j] = "{:s} ({:,} reads, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                if data[j] >= 1000000:
+                    labels[j] = "{:s} ({:,}M, {:.1f}%)".format(l, int(data[j] / 1000000),
+                                                                     round(data[j] / data_sum * 100, 1))
+                elif 1000 <= data[j] < 1000000:
+                    labels[j] = "{:s} ({:,}k, {:.1f}%)".format(l, int(data[j] / 1000),
+                                                                     round(data[j] / data_sum * 100, 1))
+                else:
+                    labels[j] = "{:s} ({:,}, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
 
             ax.pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
             ax.set_title('pass')
@@ -399,8 +415,6 @@ class FastqPlots(object):
         # Fetch required information
         df = df1.loc[:, ('Name', 'Flag', 'Length')]
 
-        # df_all = df.groupby(['Name']).sum()
-        # df_all = df.groupby('Name')['Length'].sum()
         df_all = df.groupby('Name')['Length'].sum().to_frame()
         df_pass = df[df['Flag'] == 'pass'].groupby('Name')['Length'].sum().to_frame()
         df_fail = df[df['Flag'] == 'fail'].groupby('Name')['Length'].sum().to_frame()
@@ -419,7 +433,14 @@ class FastqPlots(object):
                 data_sum = sum(data)
                 labels = list(my_df.index)
                 for j, l in enumerate(labels):
-                    labels[j] = "{:s} ({:,} bp, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                    if data[j] >= 1000000:
+                        labels[j] = "{:s} ({:,}Mb, {:.1f}%)".format(l, int(data[j] / 1000000),
+                                                                     round(data[j] / data_sum * 100, 1))
+                    elif 1000 <= data[j] < 1000000:
+                        labels[j] = "{:s} ({:,}kb, {:.1f}%)".format(l, int(data[j] / 1000),
+                                                                     round(data[j] / data_sum * 100, 1))
+                    else:
+                        labels[j] = "{:s} ({:,}bp, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
 
                 axs[i].pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
                 axs[i].set_title(titles[i])
@@ -432,7 +453,14 @@ class FastqPlots(object):
             data_sum = sum(data)
             labels = list(df_pass.index)
             for j, l in enumerate(labels):
-                labels[j] = "{:s} ({:,} bp, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
+                if data[j] >= 1000000:
+                    labels[j] = "{:s} ({:,}Mb, {:.1f}%)".format(l, int(data[j] / 1000000),
+                                                                 round(data[j] / data_sum * 100, 1))
+                elif 1000 <= data[j] < 1000000:
+                    labels[j] = "{:s} ({:,}kb, {:.1f}%)".format(l, int(data[j] / 1000),
+                                                                 round(data[j] / data_sum * 100, 1))
+                else:
+                    labels[j] = "{:s} ({:,}bp, {:.1f}%)".format(l, data[j], round(data[j] / data_sum * 100, 1))
 
             ax.pie(data, labels=labels, wedgeprops={'linewidth': 2, 'edgecolor': 'w'})
             ax.set_title('pass')
@@ -481,6 +509,7 @@ class FastqPlots(object):
         ax.ticklabel_format(style='plain')  # Disable the scientific notation on the y-axis
         # Adjust format of numbers for y-axis: "1000000" -> "1,000,000"
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        # ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}k".format(int(x / 1000))))
         # Remove legend title:
         g.legend_.set_title(None)
         # Remove extra white space around the figure
@@ -669,7 +698,10 @@ class FastqPlots(object):
         plt.legend()
         plt.xscale('log')
         ax.set(xlabel='Read length (bp)', ylabel='Frequency', title='Read length distribution')
+
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        # ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}k".format(int(x/1000))))
+
         plt.tight_layout()
         fig.savefig(out + "/length_distribution.png")
         plt.close()
