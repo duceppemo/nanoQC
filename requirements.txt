@@ -1,7 +1,7 @@
 pip~>22.3
 zlib~=1.2.11
 wheel~=0.37.0
-certifi~>2022.12.07
+certifi~>2023.7.22
 openssl~=1.1.1l
 six~=1.16.0
 cython~=0.29.24
